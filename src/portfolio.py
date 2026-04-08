@@ -8,22 +8,27 @@ from config import REPORT_DIR
 
 logger = logging.getLogger(__name__)
 
-_SNAPSHOT_PATH = os.path.join(REPORT_DIR, "portfolio_snapshot.json")
+
+def snapshot_path(tickers: list[str]) -> str:
+    """Return the snapshot file path for a given ticker list."""
+    key = "_".join(tickers) if len("_".join(tickers)) <= 80 else f"{len(tickers)}tickers"
+    return os.path.join(REPORT_DIR, f"portfolio_{key}.json")
 
 
-def load_snapshot() -> dict | None:
-    """Return the last saved snapshot dict, or None if it doesn't exist."""
-    if not os.path.exists(_SNAPSHOT_PATH):
+def load_snapshot(tickers: list[str]) -> dict | None:
+    """Return the last saved snapshot for *tickers*, or None if it doesn't exist."""
+    path = snapshot_path(tickers)
+    if not os.path.exists(path):
         return None
     try:
-        with open(_SNAPSHOT_PATH, encoding="utf-8") as fh:
+        with open(path, encoding="utf-8") as fh:
             return json.load(fh)
     except Exception as exc:
         logger.warning("Could not load portfolio snapshot: %s", exc)
         return None
 
 
-def save_snapshot(md_text: str, date_str: str) -> bool:
+def save_snapshot(md_text: str, date_str: str, tickers: list[str]) -> bool:
     """Parse the allocation table from *md_text* and persist it as JSON.
 
     Returns True if at least one position was extracted and saved.
@@ -52,9 +57,10 @@ def save_snapshot(md_text: str, date_str: str) -> bool:
         return False
 
     snapshot = {"date": date_str, "positions": positions}
+    path = snapshot_path(tickers)
     os.makedirs(REPORT_DIR, exist_ok=True)
     try:
-        with open(_SNAPSHOT_PATH, "w", encoding="utf-8") as fh:
+        with open(path, "w", encoding="utf-8") as fh:
             json.dump(snapshot, fh, indent=2, ensure_ascii=False)
         return True
     except Exception as exc:

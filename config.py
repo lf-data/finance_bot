@@ -4,9 +4,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── LLM ───────────────────────────────────────────────────────────────────────
-LLM_MODEL       = os.getenv("LLM_MODEL",       "local-model")
-LLM_API_KEY     = os.getenv("LLM_API_KEY",     "not-required")
+# ── LLM (OpenAI API) ─────────────────────────────────────────────────────────
+LLM_MODEL       = os.getenv("LLM_MODEL",       "gpt-4o")
+LLM_API_KEY     = os.getenv("LLM_API_KEY",     "")
 LLM_MAX_TOKENS  = int(os.getenv("LLM_MAX_TOKENS",    "4096"))
 
 # ── Tavily ────────────────────────────────────────────────────────────────────

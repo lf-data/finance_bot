@@ -26,10 +26,10 @@ from src.data_fetcher import (
 )
 from src.indicators import compute, format_summary
 from src.portfolio import (
-    _SNAPSHOT_PATH,
     format_snapshot_for_prompt,
     load_snapshot,
     save_snapshot,
+    snapshot_path,
 )
 from src.tools import build_tools
 
@@ -235,7 +235,7 @@ class InvestmentAgent:
         # ── Phase 3: single LLM call for allocation ─────────────────────────
         yield ("analysis_start", None)
         date     = datetime.now(timezone.utc).strftime("%B %d, %Y")
-        snapshot = load_snapshot()
+        snapshot = load_snapshot(tickers)
         prev_instructions = (
             "A previous portfolio snapshot is provided at the end of this prompt.\n"
             "For each position compare the new allocation against the previous one."
@@ -275,8 +275,8 @@ class InvestmentAgent:
         md_text = re.sub(r"<think>[\s\S]*?</think>", "", raw).strip()
         yield ("llm_stats", {"elapsed": elapsed, "in_tokens": in_tok, "out_tokens": out_tok})
         yield ("report_md", (md_text, tickers, date))
-        saved = save_snapshot(md_text, date)
-        yield ("snapshot_saved", _SNAPSHOT_PATH if saved else None)
+        saved = save_snapshot(md_text, date, tickers)
+        yield ("snapshot_saved", snapshot_path(tickers) if saved else None)
         yield ("done", None)
 
     # ── Internal ──────────────────────────────────────────────────────────────
