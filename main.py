@@ -1,103 +1,155 @@
-"""Finance Bot – investment analysis agent entry point.
+"""Finance Bot – investment analysis runner.
 
-Setup:
-    1. Copy .env.example → .env and configure LLM_BASE_URL, LLM_MODEL, TAVILY_API_KEY.
-    2. pip install -r requirements.txt
-    3. python main.py
+Usage
+-----
+# Use default tickers from .env / config.py
+python main.py
 
-LOOP_INTERVAL=0  → run once and exit.
-LOOP_INTERVAL=N  → repeat every N seconds (e.g. 86400 = daily).
+# Override tickers
+python main.py AAPL MSFT NVDA
+python main.py ISP.MI ENI.MI ENEL.MI
 """
+
+import argparse
 import logging
-import os
-import signal
 import sys
-import time
 
-from colorama import Fore, Style, init
+import colorama
+from colorama import Fore, Style
 
-from config import ANALYSIS_LANGUAGE, LOOP_INTERVAL, TICKERS
-from src.agent import InvestmentAgent
+from config import TICKERS
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s  %(levelname)-8s  %(name)s: %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("FinanceBot")
-init(autoreset=True)
+# Suppress noisy library loggers
+logging.disable(logging.CRITICAL)
 
-# ANSI colours for recommendation labels
-_REC_COLOR = {
-    "STRONG BUY":  Fore.GREEN,
-    "BUY":         Fore.GREEN,
-    "ACCUMULATE":  Fore.CYAN,
-    "HOLD":        Fore.YELLOW,
-    "REDUCE":      Fore.RED,
-    "AVOID":       Fore.RED,
-}
+colorama.init(autoreset=True)
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _print_status(msg: str) -> None:
+    print(f"\r{Fore.YELLOW}  ⟳  {Style.DIM}{msg}{Style.RESET_ALL}", end="", flush=True)
 
 
-def print_banner() -> None:
-    print(Fore.CYAN + """
-╔══════════════════════════════════════════════════════════╗
-║        FINANCE BOT – Investment Analysis Agent           ║
-║        LLM: local Docker  ·  Data: Yahoo Finance         ║
-╚══════════════════════════════════════════════════════════╝""")
-    print(f"  Tickers  : {Fore.WHITE}{', '.join(TICKERS)}{Style.RESET_ALL}")
-    print(f"  Language : {Fore.WHITE}{ANALYSIS_LANGUAGE}{Style.RESET_ALL}")
-    mode = "RUN ONCE" if LOOP_INTERVAL == 0 else f"every {LOOP_INTERVAL}s"
-    print(f"  Schedule : {Fore.WHITE}{mode}{Style.RESET_ALL}\n")
+def _clear_line() -> None:
+    print("\r" + " " * 72 + "\r", end="", flush=True)
 
 
-def print_report(result: dict) -> None:
-    print(Fore.CYAN + f"\n{'═'*62}")
-    print(Fore.CYAN + f"  Analysis complete – {result['run_time'][:19]} UTC")
-    print(Fore.CYAN + f"{'═'*62}" + Style.RESET_ALL)
+# ── Stream consumer ───────────────────────────────────────────────────────────
 
-    report = result.get("report", "")
-
-    # Colour-code recommendation lines
-    for line in report.splitlines():
-        colored = False
-        for label, color in _REC_COLOR.items():
-            if label in line.upper():
-                print(color + line + Style.RESET_ALL)
-                colored = True
-                break
-        if not colored:
-            print(line)
-
-    print()
-
-
-def main() -> None:
-    print_banner()
+def _run(tickers: list[str]) -> None:
+    from src.agent import InvestmentAgent
 
     agent = InvestmentAgent()
 
-    def _shutdown(sig, frame):  # noqa: ANN001
-        logger.info("Shutdown signal received.")
+    tickers_fmt = "  ".join(tickers)
+    print()
+    print(f"{Fore.CYAN}{Style.BRIGHT}◆  Finance Bot — Investment Analysis{Style.RESET_ALL}")
+    print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
+    print(f"{Style.DIM}Tickers:{Style.RESET_ALL}  {Fore.WHITE}{tickers_fmt}{Style.RESET_ALL}")
+    print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}\n")
+
+    pending_tool = ""
+
+    for event_type, content in agent.analyze_stream(tickers):
+
+        # ── Status (overwrite same line) ──────────────────────────────────
+        if event_type == "status":
+            _print_status(content)
+
+        # ── Parallel fetch lines ──────────────────────────────────────────
+        elif event_type == "fetch_done":
+            _clear_line()
+            print(f"  {Fore.CYAN}●{Style.RESET_ALL}  {Style.DIM}{content}{Style.RESET_ALL}")
+
+        elif event_type == "fetch_error":
+            _clear_line()
+            print(f"  {Fore.RED}✗{Style.RESET_ALL}  {Fore.RED}{content}{Style.RESET_ALL}")
+
+        # ── Analysis phase started ────────────────────────────────────────
+        elif event_type == "analysis_start":
+            if pending_tool:
+                _clear_line()
+                print(f"  {Fore.GREEN}✓{Style.RESET_ALL}  {Style.DIM}{pending_tool}{Style.RESET_ALL}")
+                pending_tool = ""
+            print()
+            _print_status("Generazione report in corso…")
+
+        # ── Tool calls ────────────────────────────────────────────────────
+        elif event_type == "tool_start":
+            label = "Ricerca notizie macro" if content == "search_news" else content
+            if pending_tool:
+                _clear_line()
+                print(f"  {Fore.GREEN}\u2713{Style.RESET_ALL}  {Style.DIM}{pending_tool}{Style.RESET_ALL}")
+            pending_tool = label
+            _print_status(label)
+
+        # ── LLM stats ─────────────────────────────────────────────────────
+        elif event_type == "llm_stats":
+            d       = content
+            elapsed = d.get("elapsed", 0.0)
+            in_tok  = d.get("in_tokens",  0)
+            out_tok = d.get("out_tokens", 0)
+            parts   = [f"⏱ {elapsed:.1f}s"]
+            if in_tok or out_tok:
+                parts += [f"↑{in_tok} in", f"↓{out_tok} out", f"= {in_tok + out_tok} tok"]
+            _clear_line()
+            print(f"{Style.DIM}  {'  '.join(parts)}{Style.RESET_ALL}")
+
+        # ── PDF report ────────────────────────────────────────────────────
+        elif event_type == "report_md":
+            md_text, tkrs, date_str = content
+            _print_status("Generazione PDF…")
+            try:
+                from src.report import save_pdf
+                path = save_pdf(md_text, tkrs, date_str)
+                _clear_line()
+                print(f"  {Fore.GREEN}✓  Report PDF salvato:{Style.RESET_ALL} {path}")
+            except Exception as exc:
+                _clear_line()
+                print(f"  {Fore.RED}✗  PDF non generato: {exc}{Style.RESET_ALL}")
+
+        # ── Portfolio snapshot ────────────────────────────────────────────
+        elif event_type == "snapshot_saved":
+            _clear_line()
+            if content:
+                print(f"  {Fore.CYAN}✓  Snapshot portafoglio aggiornato{Style.RESET_ALL}")
+            # else: table not found in report, snapshot unchanged — silent
+
+        # ── Done ──────────────────────────────────────────────────────────
+        elif event_type == "done":
+            _clear_line()
+            print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}{Style.BRIGHT}  Analisi completata.{Style.RESET_ALL}\n")
+
+
+# ── Entry point ────────────────────────────────────────────────────────────────
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Run a full investment analysis and generate a PDF report.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "Examples:\n"
+            "  python main.py\n"
+            "  python main.py AAPL MSFT NVDA\n"
+            "  python main.py ISP.MI ENI.MI ENEL.MI\n"
+        ),
+    )
+    parser.add_argument(
+        "tickers",
+        nargs="*",
+        metavar="TICKER",
+        help="Ticker symbols to analyse (overrides .env defaults when provided).",
+    )
+    args = parser.parse_args()
+
+    tickers = [t.upper() for t in args.tickers] if args.tickers else list(TICKERS)
+
+    try:
+        _run(tickers)
+    except KeyboardInterrupt:
+        print(f"\n{Fore.YELLOW}  Interrotto.{Style.RESET_ALL}\n")
         sys.exit(0)
-
-    signal.signal(signal.SIGINT,  _shutdown)
-    signal.signal(signal.SIGTERM, _shutdown)
-
-    run = 0
-    while True:
-        run += 1
-        logger.info("Starting analysis run #%d for: %s", run, ", ".join(TICKERS))
-        try:
-            result = agent.run()
-            print_report(result)
-        except Exception as exc:
-            logger.error("Run #%d failed: %s", run, exc, exc_info=True)
-
-        if LOOP_INTERVAL == 0:
-            break
-        logger.info("Next analysis in %ds (%s)…", LOOP_INTERVAL,
-                    f"{LOOP_INTERVAL // 3600}h" if LOOP_INTERVAL >= 3600 else f"{LOOP_INTERVAL}s")
-        time.sleep(LOOP_INTERVAL)
 
 
 if __name__ == "__main__":

@@ -127,9 +127,10 @@ def build_tools() -> list:
             from tavily import TavilyClient  # type: ignore
             client = TavilyClient(api_key=TAVILY_API_KEY)
             result = client.search(
+                topic="finance",
                 query=query,
-                search_depth="advanced",
-                max_results=6,
+                search_depth="basic",
+                max_results=10,
                 include_answer=True,
             )
             answer    = result.get("answer", "")

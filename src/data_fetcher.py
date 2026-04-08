@@ -82,9 +82,17 @@ def fetch_analyst_recommendations(ticker: str) -> list[dict]:
 def fetch_earnings_history(ticker: str) -> list[dict]:
     """Return recent quarterly earnings (EPS actual vs estimate)."""
     try:
-        t      = yf.Ticker(ticker)
-        cal    = getattr(t, "earnings_history", None) or getattr(t, "quarterly_earnings", None)
-        if cal is None or (hasattr(cal, "empty") and cal.empty):
+        t   = yf.Ticker(ticker)
+        cal = getattr(t, "earnings_history", None)
+        if cal is None or (isinstance(cal, pd.DataFrame) and cal.empty):
+            # Fallback: derive Net Income from the quarterly income statement
+            # (avoids the deprecated Ticker.earnings / quarterly_earnings property)
+            stmt = getattr(t, "quarterly_income_stmt", None)
+            if stmt is not None and not stmt.empty:
+                ni_row = stmt.loc[stmt.index.str.contains("Net Income", case=False, na=False)]
+                if not ni_row.empty:
+                    cal = ni_row.T.rename(columns={ni_row.index[0]: "epsActual"})
+        if cal is None or (isinstance(cal, pd.DataFrame) and cal.empty):
             return []
         if isinstance(cal, pd.DataFrame):
             return cal.tail(8).reset_index().to_dict("records")

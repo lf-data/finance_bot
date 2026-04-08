@@ -36,3 +36,5 @@ Thumbs.db
 config/secrets.json
 *.db
 *.sqlite
+
+/reports/*

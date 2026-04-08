@@ -131,43 +131,27 @@ def compute(df: pd.DataFrame) -> Optional[dict]:
 
 
 def format_summary(ind: dict) -> str:
-    """Return a compact multi-line text summary for the LLM."""
+    """Return a minimal single-block summary for the LLM."""
+    p = ind['current_price']
     lines = [
-        f"Current Price : {ind['current_price']}",
-        "",
-        "── Moving Averages ──",
-        f"  SMA20  : {ind.get('sma20','N/A')}  ({ind.get('sma20_distance_pct','?'):+}% vs price)",
-        f"  SMA50  : {ind.get('sma50','N/A')}  ({ind.get('sma50_distance_pct','?'):+}% vs price)",
-        f"  SMA200 : {ind.get('sma200','N/A')}  ({ind.get('sma200_distance_pct','?'):+}% vs price)",
-        f"  Trend (SMA50/200): {ind.get('trend_50_200','N/A')}",
-        "",
-        "── Bollinger Bands (20,2) ──",
-        f"  Upper={ind.get('bb_upper','?')}  Mid={ind.get('bb_mid','?')}  Lower={ind.get('bb_lower','?')}",
-        f"  %B={ind.get('bb_pct_b','?')}  (0=at lower, 1=at upper)  Bandwidth={ind.get('bb_bandwidth','?')}%",
-        "",
-        "── Momentum ──",
-        f"  RSI14 : {ind.get('rsi14','?')}",
-        f"  MACD  : {ind.get('macd','?')}  Signal={ind.get('macd_signal','?')}  Hist={ind.get('macd_hist','?')}  [{ind.get('macd_trend','?')}]",
-        "",
-        "── Volatility ──",
-        f"  ATR14 : {ind.get('atr14','?')}  ({ind.get('atr14_pct','?')}% of price)",
-        "",
-        "── 52-Week Range ──",
-        f"  High  : {ind.get('52w_high','?')}  ({ind.get('52w_high_dist_pct','?'):+}% vs current)",
-        f"  Low   : {ind.get('52w_low','?')}   ({ind.get('52w_low_dist_pct','?'):+}% vs current)",
-        "",
-        "── Performance ──",
-        f"  1M={ind.get('perf_1m_pct','?'):+}%  3M={ind.get('perf_3m_pct','?'):+}%  6M={ind.get('perf_6m_pct','?'):+}%  1Y={ind.get('perf_1y_pct','?'):+}%",
-        "",
-        "── Support / Resistance (60d) ──",
-        f"  Support={ind.get('support_60d','?')}  Resistance={ind.get('resistance_60d','?')}",
+        f"price={p}  "
+        f"sma20={ind.get('sma20','?')}({ind.get('sma20_distance_pct','?'):+}%)  "
+        f"sma50={ind.get('sma50','?')}({ind.get('sma50_distance_pct','?'):+}%)  "
+        f"sma200={ind.get('sma200','?')}({ind.get('sma200_distance_pct','?'):+}%)  "
+        f"{ind.get('trend_50_200','?')}",
+
+        f"rsi={ind.get('rsi14','?')}  "
+        f"macd={ind.get('macd_trend','?')}(hist={ind.get('macd_hist','?')})  "
+        f"bb%B={ind.get('bb_pct_b','?')}  bw={ind.get('bb_bandwidth','?')}%  "
+        f"atr={ind.get('atr14_pct','?')}%",
+
+        f"52w H={ind.get('52w_high','?')}({ind.get('52w_high_dist_pct','?'):+}%)  "
+        f"L={ind.get('52w_low','?')}({ind.get('52w_low_dist_pct','?'):+}%)  "
+        f"perf 1M={ind.get('perf_1m_pct','?'):+}%  3M={ind.get('perf_3m_pct','?'):+}%  "
+        f"1Y={ind.get('perf_1y_pct','?'):+}%",
     ]
-    if "avg_volume_20d" in ind:
-        lines += [
-            "",
-            "── Volume ──",
-            f"  Avg(20d)={ind['avg_volume_20d']:,}  Recent(5d)={ind['recent_volume_5d']:,}  vs avg={ind.get('volume_vs_avg_pct','?'):+}%",
-        ]
+    if "volume_vs_avg_pct" in ind:
+        lines.append(f"vol vs 20d avg={ind['volume_vs_avg_pct']:+}%")
     return "\n".join(lines)
 
 
