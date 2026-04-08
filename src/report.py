@@ -112,38 +112,44 @@ _HTML_TEMPLATE = """\
 """
 
 
-def save_pdf(markdown_text: str, tickers: list[str], date_str: str) -> str:
-    """Convert *markdown_text* to a styled PDF saved in REPORT_DIR.
+def save_pdf(
+    markdown_text: str,
+    tickers: list[str],
+    date_str: str,
+    output_path: str | None = None,
+) -> str:
+    """Convert *markdown_text* to a styled PDF.
 
     Parameters
     ----------
     markdown_text : str
         Full markdown string produced by the LLM.
     tickers : list[str]
-        Ticker symbols included in the report (used for the filename).
+        Ticker symbols included in the report (used for the auto filename).
     date_str : str
-        Date label (e.g. ``"April 08, 2026"``), used for the filename.
+        Date label (e.g. ``"April 08, 2026"``), used for the auto filename.
+    output_path : str | None
+        If provided, the PDF is saved to this exact path (directory is created
+        if it does not exist). Otherwise the file is placed in REPORT_DIR with
+        an auto-generated name.
 
     Returns
     -------
     str
         Absolute path of the saved PDF file.
     """
-    os.makedirs(REPORT_DIR, exist_ok=True)
-
-    safe_date = date_str.replace(",", "").replace(" ", "_")
-    if tickers:
-        joined = "_".join(tickers)
-        # Keep filename within ~100 chars for the ticker portion so the full
-        # path stays well under Windows MAX_PATH (260 chars).
-        if len(joined) > 80:
-            safe_tickers = f"{len(tickers)}tickers"
-        else:
-            safe_tickers = joined
+    if output_path:
+        out_path = os.path.abspath(output_path)
+        os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     else:
-        safe_tickers = "report"
-    filename = f"{safe_date}_{safe_tickers}.pdf"
-    out_path = os.path.join(REPORT_DIR, filename)
+        os.makedirs(REPORT_DIR, exist_ok=True)
+        safe_date = date_str.replace(",", "").replace(" ", "_")
+        if tickers:
+            joined = "_".join(tickers)
+            safe_tickers = f"{len(tickers)}tickers" if len(joined) > 80 else joined
+        else:
+            safe_tickers = "report"
+        out_path = os.path.join(REPORT_DIR, f"{safe_date}_{safe_tickers}.pdf")
 
     # Markdown → HTML
     md_processor = markdown.Markdown(

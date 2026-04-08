@@ -1,12 +1,14 @@
 # Finance Bot — Investment Analysis Agent
 
-An AI-powered investment analysis tool that fetches real-time market data, performs technical and fundamental analysis on a list of stocks, searches macro and per-ticker news, and generates a comprehensive **investment report in PDF format** — without any human interaction.
+An AI-powered investment analysis tool that fetches real-time market data, computes screener-style fundamental metrics with a composite score, performs technical analysis, searches macro and per-ticker news, and generates a comprehensive **investment report in PDF format** — without any human interaction.
 
 ---
 
 ## Features
 
-- **Parallel data fetch** — price history, fundamentals, analyst ratings, and earnings for all tickers simultaneously
+- **Parallel data fetch** — price history, fundamental metrics, and news for all tickers simultaneously
+- **Screener-style scoring** — every ticker receives a composite score 0–100 computed from raw yfinance data (no analyst estimates, no third-party ratings)
+- **Sector-aware scoring** — separate scoring model for Financial Services (banks/insurers) vs all other sectors
 - **Per-ticker news search** — direct Tavily web search for each stock (no LLM intermediary)
 - **Macro context search** — a single LLM-guided Tavily search covering rates, inflation, geopolitics, and sector trends
 - **Single LLM call** for the full report — no interactive chat, no multi-turn overhead
@@ -31,9 +33,9 @@ finance_bot/
 │   └── portfolio_snapshot.json
 └── src/
     ├── agent.py          # Core analysis agent
-    ├── data_fetcher.py   # yfinance wrappers
+    ├── data_fetcher.py   # yfinance fetch + metric computation + composite score
     ├── indicators.py     # Technical indicator computation
-    ├── tools.py          # LangChain tools (technical, fundamental, ratings, news)
+    ├── tools.py          # LangChain tools (technical, fundamental, news)
     ├── portfolio.py      # Snapshot save/load and prompt formatting
     └── report.py         # Markdown → HTML → PDF conversion
 ```
@@ -51,9 +53,7 @@ For every ticker, the following is fetched concurrently (up to 6 workers):
 |---|---|---|
 | Price history | yfinance | 1 year daily OHLCV |
 | Technical indicators | Computed locally | SMA 20/50/200, Bollinger Bands, RSI(14), MACD(12/26/9), ATR(14), volume ratio, 52-week range |
-| Fundamentals | yfinance | P/E, forward P/E, PEG, EPS, revenue/earnings growth, margins, ROE, D/E, beta, analyst targets |
-| Analyst ratings | yfinance | 10 most recent broker ratings |
-| Earnings history | yfinance | Last 8 quarters (EPS actual vs estimate) |
+| Fundamental metrics + score | yfinance | See [Fundamental Data & Scoring](#fundamental-data--scoring) below |
 | Ticker news | Tavily API | Direct search: latest news, earnings, analyst outlook for each symbol |
 
 ### Phase 2 — Macro Context Search
@@ -72,8 +72,7 @@ All pre-fetched data is serialised into a compact context block and sent to the 
 1. **Macro & Sector Context** — narrative interpretation of current macro conditions
 2. **Individual Ticker Analysis** — for each ticker:
    - Technical Outlook (trend, key levels, momentum)
-   - Fundamental Outlook (valuation, profitability, balance sheet)
-   - Analyst Consensus (rating, price target, recent changes)
+   - Fundamental Outlook (valuation, profitability, balance sheet — metrics appropriate to the sector)
    - Catalysts & Risks (from the ticker's news feed)
    - **Verdict**: `STRONG BUY` / `BUY` / `ACCUMULATE` / `HOLD` / `REDUCE` / `AVOID`
 3. **Portfolio Allocation** — max 5 highest-conviction tickers rated BUY or better, with sector exclusion if macro/news conditions warrant it. Includes a `vs Previous` column tracking changes from the prior run.
@@ -84,21 +83,130 @@ The Markdown is then rendered to a **styled PDF** and saved to `reports/`.
 
 ---
 
+## Fundamental Data & Scoring
+
+All fundamental data is sourced exclusively from **yfinance** (`yf.Ticker.info`, `balance_sheet`, `income_stmt`). No analyst estimates, broker ratings, or third-party consensus data are used.
+
+### Metrics collected
+
+#### Basic info
+| Field | Source | Description |
+|---|---|---|
+| `nome` | `shortName` | Company name |
+| `settore` | `sector` | Yahoo Finance sector classification |
+| `mktcap` | `marketCap` | Market capitalisation |
+
+#### Valuation
+| Field | Source | Description |
+|---|---|---|
+| `pe_trailing` | `trailingPE` | Price / trailing 12-month EPS |
+| `pe_forward` | `forwardPE` | Price / next 12-month EPS estimate |
+| `ev_ebitda` | `enterpriseToEbitda` | Enterprise Value / EBITDA |
+| `ev_sales` | `enterpriseToRevenue` | Enterprise Value / Revenue |
+| `p_book` | `priceToBook` | Price / Book Value |
+| `p_fcf` | computed | Market Cap / Free Cash Flow (omitted if FCF ≤ 0) |
+
+#### Capital efficiency
+| Field | Source | Description |
+|---|---|---|
+| `roe` | `returnOnEquity` × 100 | Return on Equity % |
+| `roa` | `returnOnAssets` × 100 | Return on Assets % |
+| `roic` | computed | Net Income / (Total Assets − Current Liabilities) × 100 |
+
+#### Earnings quality
+| Field | Source | Description |
+|---|---|---|
+| `fcf_conversion` | computed | Free Cash Flow / Net Income × 100 |
+| `fcf_margin` | computed | Free Cash Flow / Revenue × 100 |
+| `gross_margin` | `grossMargins` × 100 | Gross Margin % |
+| `operating_margin` | `operatingMargins` × 100 | Operating Margin % |
+| `profit_margin` | `profitMargins` × 100 | Net Profit Margin % |
+
+#### Financial solidity
+| Field | Source | Description |
+|---|---|---|
+| `debt_ebitda` | computed | (Total Debt − Cash) / EBITDA |
+| `interest_coverage` | computed | EBIT / \|Interest Expense\| (from `income_stmt`) |
+| `current_ratio` | `currentRatio` | Current Assets / Current Liabilities |
+| `quick_ratio` | `quickRatio` | (Current Assets − Inventory) / Current Liabilities |
+| `debt_equity` | `debtToEquity` | Total Debt / Equity |
+
+#### Growth
+| Field | Source | Description |
+|---|---|---|
+| `rev_growth_yoy` | `revenueGrowth` × 100 | Revenue growth year-over-year % |
+
+#### Momentum (computed from price history)
+| Field | Method | Description |
+|---|---|---|
+| `momentum_6m` | `(P_last / P_first − 1) × 100` | 6-month price return % |
+| `momentum_12m` | `(P_last / P_first − 1) × 100` | 12-month price return % |
+
+> **Missing values:** if a field cannot be fetched (e.g. banks have no EBITDA or FCF), it is simply omitted. The scoring functions skip `None` values and normalise the final score over the weights that were actually present — so a ticker with fewer available metrics is not penalised.
+
+---
+
+### Composite score (0–100)
+
+The score is computed differently depending on the sector, because standard industrial metrics are structurally unavailable for banks and insurers.
+
+#### Standard score — all sectors except Financial Services
+
+Six equally-weighted pillars (theoretical total = 100 pts):
+
+| Pillar | Metrics | Weight |
+|---|---|---|
+| **Capital efficiency** | ROIC (15), ROE (10) | 25 |
+| **Earnings quality** | FCF conversion (12), FCF margin (8) | 20 |
+| **Financial solidity** | Net Debt/EBITDA ↓ (10), Interest coverage (10) | 20 |
+| **Valuation** | EV/EBITDA ↓ (8), P/FCF ↓ (7) | 15 |
+| **Growth** | Revenue growth (5), Gross margin (5) | 10 |
+| **Momentum** | 6m return (5), 12m return (5) | 10 |
+
+Each metric is min-max normalised to [0, 1] within calibrated ranges. Lower-is-better metrics (`↓`) are inverted. The final score is:
+
+$$\text{score} = \frac{\sum_{i} \text{norm}_i \times w_i}{\sum_{i} w_i} \times 100$$
+
+where the sum runs only over metrics that are not `None`.
+
+#### Bank score — Financial Services sector
+
+Standard EBITDA/FCF/current ratio metrics do not apply to banks and insurers. A dedicated four-pillar model is used instead:
+
+| Pillar | Metrics | Weight |
+|---|---|---|
+| **Valuation** | P/E trailing ↓ (20), P/Book ↓ (15) | 35 |
+| **Profitability** | ROE (20), Net profit margin (15) | 35 |
+| **Growth** | Revenue growth (15) | 15 |
+| **Momentum** | 6m return (8), 12m return (7) | 15 |
+
+---
+
 ## Portfolio Snapshot
 
-After each run, the allocation table is parsed and saved to `reports/portfolio_snapshot.json`:
+After each run, the allocation table is parsed and **appended** to `reports/portfolio_<tickers>.json` as a new history entry:
 
 ```json
 {
-  "date": "April 08, 2026",
-  "positions": [
-    { "ticker": "AAPL", "rating": "BUY", "weight": "25%", "target": "$210" },
-    ...
+  "history": [
+    {
+      "date": "April 08, 2026",
+      "positions": [
+        { "ticker": "UCG.MI", "rating": "BUY", "weight": "25%", "target": "82.42" },
+        ...
+      ]
+    },
+    {
+      "date": "April 15, 2026",
+      "positions": [ ... ]
+    }
   ]
 }
 ```
 
-On the **next run**, this snapshot is loaded and appended to the system prompt. The LLM then fills the `vs Previous` column in the allocation table:
+Each run adds a new entry — nothing is ever overwritten. The full history is yours to review; the **LLM only ever sees the most recent entry** (the last element of `history`) to avoid inflating the context window.
+
+Existing files in the old flat format (`{"date": ..., "positions": [...]}`) are automatically migrated to the new format on the next run.
 
 | Symbol | Meaning |
 |---|---|
@@ -169,6 +277,9 @@ python main.py
 python main.py AAPL MSFT NVDA
 python main.py ISP.MI ENI.MI ENEL.MI UCG.MI
 ```
+
+When the PDF is ready, a native **Save As** dialog opens so you can choose where to save it.
+If you close the dialog without choosing a path, the file is saved automatically in the `reports/` folder with an auto-generated name.
 
 ### Windows — `finanalysis.bat`
 

@@ -36,6 +36,33 @@ def _clear_line() -> None:
 
 # ── Stream consumer ───────────────────────────────────────────────────────────
 
+def _ask_save_path(tickers: list[str], date_str: str) -> str | None:
+    """Open a native Save-As dialog and return the chosen path, or None to use default."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        safe_date = date_str.replace(",", "").replace(" ", "_")
+        joined = "_".join(tickers)
+        safe_tickers = f"{len(tickers)}tickers" if len(joined) > 80 else joined
+        default_name = f"{safe_date}_{safe_tickers}.pdf"
+
+        root = tk.Tk()
+        root.withdraw()          # hide the empty root window
+        root.attributes("-topmost", True)
+        path = filedialog.asksaveasfilename(
+            parent=root,
+            title="Salva report PDF",
+            initialfile=default_name,
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+        )
+        root.destroy()
+        return path if path else None   # empty string = user cancelled → use default
+    except Exception:
+        return None  # tkinter not available → fall back to default path
+
+
 def _run(tickers: list[str]) -> None:
     from src.agent import InvestmentAgent
 
@@ -101,7 +128,8 @@ def _run(tickers: list[str]) -> None:
             _print_status("Generazione PDF…")
             try:
                 from src.report import save_pdf
-                path = save_pdf(md_text, tkrs, date_str)
+                output_path = _ask_save_path(tkrs, date_str)
+                path = save_pdf(md_text, tkrs, date_str, output_path)
                 _clear_line()
                 print(f"  {Fore.GREEN}✓  Report PDF salvato:{Style.RESET_ALL} {path}")
             except Exception as exc:

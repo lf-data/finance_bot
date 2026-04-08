@@ -2,9 +2,8 @@
 
 Tools (read-only – no orders):
   1. get_technical_analysis(ticker)   – yfinance OHLCV + computed indicators
-  2. get_fundamental_data(ticker)     – yfinance fundamentals + analyst targets
-  3. get_analyst_recommendations(ticker) – recent analyst rating history
-  4. search_news(query)               – Tavily web search
+  2. get_fundamental_data(ticker)     – screener-style fundamentals + composite score
+  3. search_news(query)               – Tavily web search
 """
 import json
 import logging
@@ -13,8 +12,6 @@ from langchain_core.tools import tool
 
 from config import TAVILY_API_KEY
 from src.data_fetcher import (
-    fetch_analyst_recommendations,
-    fetch_earnings_history,
     fetch_fundamentals,
     fetch_history,
 )
@@ -51,15 +48,17 @@ def build_tools() -> list:
 
     @tool
     def get_fundamental_data(ticker: str) -> str:
-        """Fetch fundamental financial data from Yahoo Finance for a stock.
+        """Fetch screener-style fundamental metrics from Yahoo Finance for a stock.
 
-        Returns: company name, sector, P/E ratio (trailing and forward),
-        EPS, revenue growth, earnings growth, margins (gross/operating/net),
-        ROE, debt/equity, dividend yield, beta, analyst price targets, and
-        consensus recommendation.
+        Returns: company name, sector, valuation (P/E trailing/forward, EV/EBITDA,
+        EV/Sales, PEG, P/Book, P/FCF), capital efficiency (ROIC, ROE, ROA),
+        earnings quality (FCF conversion, FCF margin, gross/operating margin),
+        financial solidity (Net Debt/EBITDA, interest coverage, current/quick ratio,
+        debt/equity), growth (revenue and EPS YoY), momentum (6m and 12m price
+        performance), and a composite score 0-100.
 
-        Use this to assess the valuation and financial health of a company.
-        Input: ticker symbol (e.g. AAPL, NVDA).
+        Use this to assess the valuation, quality and financial health of a company.
+        Input: ticker symbol (e.g. AAPL, NVDA, ENI.MI).
         """
         ticker = ticker.upper().strip()
         data = fetch_fundamentals(ticker)
@@ -68,7 +67,7 @@ def build_tools() -> list:
 
         def fmt(v: object) -> str:
             if isinstance(v, float):
-                return f"{v:.4f}" if abs(v) < 1000 else f"{v:,.0f}"
+                return f"{v:.2f}" if abs(v) < 1_000 else f"{v:,.0f}"
             return str(v)
 
         lines = [f"Fundamentals for {ticker}:"]
@@ -76,40 +75,7 @@ def build_tools() -> list:
             lines.append(f"  {k}: {fmt(v)}")
         return "\n".join(lines)
 
-    # ── 3. Analyst recommendations ────────────────────────────────────────────
-
-    @tool
-    def get_analyst_recommendations(ticker: str) -> str:
-        """Fetch the most recent analyst buy/sell/hold ratings from Yahoo Finance.
-
-        Also includes recent quarterly earnings results (actual vs estimated EPS).
-        Use this to understand what professional analysts think about the stock.
-        Input: ticker symbol (e.g. TSLA, GOOGL).
-        """
-        ticker = ticker.upper().strip()
-        recs   = fetch_analyst_recommendations(ticker)
-        earn   = fetch_earnings_history(ticker)
-
-        lines = [f"Analyst Recommendations for {ticker}:"]
-        if recs:
-            for r in recs[-8:]:
-                period = r.get("period", r.get("Date", ""))
-                firm   = r.get("Firm", r.get("firm", ""))
-                grade  = r.get("To Grade", r.get("toGrade", r.get("action", "")))
-                lines.append(f"  {period}  {firm}: {grade}")
-        else:
-            lines.append("  No analyst ratings available.")
-
-        lines.append("\nRecent Earnings (EPS Actual vs Estimate):")
-        if earn:
-            for e in earn[-4:]:
-                lines.append(f"  {e}")
-        else:
-            lines.append("  No earnings data available.")
-
-        return "\n".join(lines)
-
-    # ── 4. News search ────────────────────────────────────────────────────────
+    # ── 3. News search ────────────────────────────────────────────────────────
 
     @tool
     def search_news(query: str) -> str:
@@ -144,5 +110,4 @@ def build_tools() -> list:
             logger.error("Tavily search error: %s", exc)
             return f"News search failed: {exc}"
 
-    return [get_technical_analysis, get_fundamental_data,
-            get_analyst_recommendations, search_news]
+    return [get_technical_analysis, get_fundamental_data, search_news]

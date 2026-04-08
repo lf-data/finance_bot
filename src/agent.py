@@ -19,8 +19,6 @@ from config import (
     TICKERS,
 )
 from src.data_fetcher import (
-    fetch_analyst_recommendations,
-    fetch_earnings_history,
     fetch_fundamentals,
     fetch_history,
 )
@@ -41,14 +39,16 @@ logger = logging.getLogger(__name__)
 #           | "analysis_start" | "status" | "llm_stats" | "report_md" | "done"
 StreamEvent = tuple[str, object]
 
-# ── Key fundamental fields — set for O(1) lookup ──────────────────────────────
+# ── Screener fundamental fields — set for O(1) lookup ────────────────────────
 _FUND_KEYS: frozenset[str] = frozenset([
-    "longName", "sector",
-    "trailingPE", "forwardPE", "pegRatio",
-    "trailingEps", "forwardEps",
-    "revenueGrowth", "earningsGrowth",
-    "profitMargins", "returnOnEquity", "debtToEquity",
-    "beta", "recommendationKey", "targetMeanPrice",
+    "nome", "settore", "mktcap",
+    "score",
+    "pe_trailing", "pe_forward", "ev_ebitda", "ev_sales", "peg", "p_book", "p_fcf",
+    "roic", "roe", "roa",
+    "fcf_conversion", "fcf_margin", "gross_margin", "operating_margin", "profit_margin",
+    "debt_ebitda", "interest_coverage", "current_ratio", "quick_ratio", "debt_equity",
+    "rev_growth_yoy",
+    "momentum_6m", "momentum_12m",
 ])
 
 # ── Macro-news prompt (called once; search_news tool available) ────────────────
@@ -127,12 +127,16 @@ For EACH ticker in the list, write a dedicated sub-section:
 indicators (RSI, MACD, moving averages). State whether the technical picture is
 bullish, bearish, or neutral and why.
 
-**Fundamental Outlook:** Analyse the valuation (P/E, forward P/E, PEG, EPS growth),
-profitability (margins, ROE), and balance sheet health (debt/equity). Compare to
-sector averages where possible. Highlight any red flags or strengths.
-
-**Analyst Consensus:** Report the consensus rating and mean price target. Note any
-recent upgrades or downgrades and what they signal.
+**Fundamental Outlook:** Reference the composite score (0-100) and its key drivers.
+For non-financial companies: analyse valuation metrics (P/E trailing/forward, EV/EBITDA,
+P/FCF, PEG), capital efficiency (ROIC, ROE), earnings quality (FCF conversion, FCF margin,
+gross/operating margin), and balance sheet health (Net Debt/EBITDA, interest coverage,
+debt/equity).
+For banks and financial institutions (sector = Financial Services): focus on P/E, P/Book,
+ROE, net profit margin, and revenue growth — the standard EBITDA/FCF/current ratio metrics
+do not apply to banks by design.
+In both cases highlight momentum (6m/12m price performance). Compare metrics to sector
+norms where possible. Call out red flags or standout strengths explicitly.
 
 **Catalysts & Risks:** Using the `news:` field provided in the context for this ticker,
 identify 2-3 specific positive catalysts and 2-3 specific risks for the next 6-18 months.
@@ -144,7 +148,6 @@ Provide 2-3 sentences explaining the verdict, referencing the data above.
 ---
 
 ## 3. PORTFOLIO ALLOCATION
-Include ONLY tickers rated STRONG BUY, BUY, or ACCUMULATE.
 Select AT MOST 5 tickers — choose the highest-conviction ones if more qualify.
 If none qualify, state: **NO BUY OPPORTUNITIES AT THIS TIME** and explain why.
 
@@ -292,10 +295,8 @@ class InvestmentAgent:
             ind  = compute(df) if df is not None else None
             tech = format_summary(ind) if ind else "No technical data."
             fund = fetch_fundamentals(ticker)
-            recs = fetch_analyst_recommendations(ticker)
-            earn = fetch_earnings_history(ticker)
             news = _search_ticker_news(ticker)
-            return ticker, {"tech": tech, "fund": fund, "recs": recs, "earn": earn, "news": news}, \
+            return ticker, {"tech": tech, "fund": fund, "news": news}, \
                    time.perf_counter() - t0
 
         results: dict = {}
@@ -309,7 +310,7 @@ class InvestmentAgent:
                     yield ("fetch_done", f"{ticker}  ({elapsed:.1f}s)")
                 except Exception as exc:
                     logger.error("Prefetch error for %s: %s", ticker, exc)
-                    results[ticker] = {"tech": "Error.", "fund": {}, "recs": [], "earn": [], "news": ""}
+                    results[ticker] = {"tech": "Error.", "fund": {}, "news": ""}
                     yield ("fetch_error", ticker)
         yield ("_done_", results)
 
@@ -328,31 +329,6 @@ class InvestmentAgent:
             if fund:
                 items = [f"{k}={v}" for k, v in fund.items() if k in _FUND_KEYS and v is not None]
                 rows.append("fund: " + "  ".join(items))
-
-            # Analyst ratings – last 3 only, compressed
-            recs = d.get("recs", [])
-            if recs:
-                rec_parts = []
-                for r in recs[-3:]:
-                    firm  = r.get("Firm", r.get("firm", ""))
-                    grade = r.get("To Grade", r.get("toGrade", r.get("action", "")))
-                    if firm or grade:
-                        rec_parts.append(f"{firm}:{grade}" if firm else grade)
-                if rec_parts:
-                    rows.append("ratings: " + "  ".join(rec_parts))
-
-            # Earnings – last 2 quarters, key fields only
-            earn = d.get("earn", [])
-            if earn:
-                eq = []
-                for e in earn[-2:]:
-                    act  = e.get("epsActual",   e.get("Reported EPS", ""))
-                    est  = e.get("epsEstimate",  e.get("EPS Estimate", ""))
-                    date = e.get("quarter",      e.get("Date", ""))
-                    if act or est:
-                        eq.append(f"{date} act={act} est={est}")
-                if eq:
-                    rows.append("eps: " + "  ".join(eq))
 
             # Per-ticker news (direct Tavily fetch, truncated for token efficiency)
             news = d.get("news", "")
