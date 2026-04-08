@@ -376,3 +376,15 @@ Tickers:  ISP.MI  ENI.MI  ENEL.MI
 | `colorama` | Coloured console output |
 | `markdown` | Markdown → HTML conversion |
 | `xhtml2pdf` | HTML → PDF rendering (pure Python, no system deps) |
+
+---
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
+
+---
+
+## License
+
+This project is released under the [MIT License](LICENSE).
