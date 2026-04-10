@@ -11,4 +11,4 @@ if not exist "%PYTHON%" (
     exit /b 1
 )
 
-"%PYTHON%" "%SCRIPT_DIR%main.py" %*
+"%PYTHON%" "%SCRIPT_DIR%screener.py" %*

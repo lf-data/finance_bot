@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  quality:
+    name: Code quality
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # ── Install only lint/security deps (fast, no heavy ML libs) ──────────
+      - name: Install dev tools
+        run: pip install ruff bandit[toml] colorama python-dotenv
+
+      # ── Syntax check (catches import errors and syntax bugs) ───────────────
+      - name: Syntax check
+        run: python -m py_compile screener.py config.py
+
+      # ── Linting (ruff: fast, covers PEP8 + common bugs) ───────────────────
+      - name: Lint with ruff
+        run: |
+          ruff check screener.py config.py \
+            --select E,W,F,B,C4,UP \
+            --ignore E501,E402
+
+      # ── JSON validity (thresholds + pillar weights must parse correctly) ───
+      - name: Validate thresholds.json
+        run: |
+          python - <<'EOF'
+          import json, sys
+
+          with open("thresholds.json", encoding="utf-8") as f:
+              data = json.load(f)
+
+          # pesi must exist and sum to 1.0
+          pesi = data.get("pesi", {})
+          total = sum(pesi.get(k, 0) for k in ("value", "quality", "momentum"))
+          if abs(total - 1.0) > 1e-6:
+              print(f"ERROR: pesi sum = {total}, expected 1.0")
+              sys.exit(1)
+
+          # tickers must be a non-empty list
+          tickers = data.get("tickers", [])
+          if not tickers:
+              print("ERROR: tickers list is empty")
+              sys.exit(1)
+
+          # every sector block must have value / quality / momentum pillars
+          reserved = {"pesi", "tickers"}
+          for sector, pillars in data.items():
+              if sector in reserved:
+                  continue
+              for pillar in ("value", "quality", "momentum"):
+                  if pillar not in pillars:
+                      print(f"ERROR: sector '{sector}' missing pillar '{pillar}'")
+                      sys.exit(1)
+              for pillar, entries in pillars.items():
+                  for e in entries:
+                      for key in ("metrica", "good", "bad", "lower_is_better"):
+                          if key not in e:
+                              print(f"ERROR: entry in {sector}/{pillar} missing '{key}'")
+                              sys.exit(1)
+
+          print(f"thresholds.json OK — {len(data)-2} sectors, {len(tickers)} tickers, pesi={pesi}")
+          EOF
+
+      # ── Security scan (OWASP-aligned, skip low-severity false positives) ──
+      - name: Security scan with bandit
+        run: |
+          bandit -r screener.py config.py \
+            --severity-level medium \
+            --confidence-level medium \
+            -q
