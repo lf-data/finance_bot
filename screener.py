@@ -22,8 +22,6 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
-
 import pandas as pd
 import yfinance as yf
 import colorama
@@ -78,7 +76,7 @@ _THRESHOLDS, _VQM_WEIGHTS, DEFAULT_TICKERS = _load_vqm_config()
 
 # ── FETCH METRICHE DA YFINANCE ───────────────────────────────────────────────
 
-def _safe(val, multiplier=1.0, decimals=2) -> Optional[float]:
+def _safe(val, multiplier=1.0, decimals=2) -> float | None:
     """Normalizza valori restituiti da yfinance (alcuni sono frazioni, altri già %)."""
     if val is None:
         return None
@@ -88,7 +86,7 @@ def _safe(val, multiplier=1.0, decimals=2) -> Optional[float]:
     except (ValueError, TypeError):
         return None
 
-def _momentum_12m_1m(ticker_obj: yf.Ticker) -> Optional[float]:
+def _momentum_12m_1m(ticker_obj: yf.Ticker) -> float | None:
     """Rendimento 12M escludendo l'ultimo mese (cross-sectional momentum standard)."""
     try:
         hist = ticker_obj.history(period="13mo", interval="1mo", auto_adjust=True)
@@ -108,7 +106,7 @@ def _momentum_12m_1m(ticker_obj: yf.Ticker) -> Optional[float]:
         pass
     return None
 
-def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> Optional[float]:
+def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> float | None:
     """Rendimento 12M titolo - rendimento 12M benchmark."""
     try:
         hist_t = ticker_obj.history(period="12mo", auto_adjust=True)
@@ -121,7 +119,7 @@ def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> Optio
     except Exception:
         return None
 
-def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict) -> Optional[float]:
+def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict) -> float | None:
     """
     CAGR EPS a 5 anni — 2 livelli di fallback:
     1. Net Income / shares da income_stmt (fino a 4 anni → CAGR)
@@ -276,8 +274,8 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 # Score 0-10 per ogni metrica, poi score per pillar (VALUE, QUALITY, MOMENTUM).
 # Score finale = 30% VALUE + 40% QUALITY + 30% MOMENTUM (pesi default).
 
-def _score_metric(val: Optional[float], good: float, bad: float,
-                  lower_is_better: bool = False) -> Optional[float]:
+def _score_metric(val: float | None, good: float, bad: float,
+                  lower_is_better: bool = False) -> float | None:
     """
     Normalizza una metrica su scala 0-10.
     good = soglia ottimale, bad = soglia negativa.
@@ -314,7 +312,7 @@ def calc_vqm_score(metrics: dict) -> dict:
     thr    = _get_thresholds(sector)
     scores = {}
 
-    def pillar_score(defs: list) -> Optional[float]:
+    def pillar_score(defs: list) -> float | None:
         vals = []
         for metric, good, bad, lib in defs:
             if good is None:   # metrica N/A per questo settore
@@ -356,10 +354,13 @@ def calc_vqm_score(metrics: dict) -> dict:
     }
 
 
-def _classify(score: Optional[float]) -> str:
-    if score is None: return "N/D"
-    if score >= 7.5:  return "BUY"
-    if score >= 5.0:  return "HOLD"
+def _classify(score: float | None) -> str:
+    if score is None:
+        return "N/D"
+    if score >= 7.5:
+        return "BUY"
+    if score >= 5.0:
+        return "HOLD"
     return "SELL"
 
 
@@ -567,7 +568,7 @@ def export_json(results: list[dict], path: str, benchmark: str, ai_enabled: bool
 
 # ── SAVE DIALOG ──────────────────────────────────────────────────────────────
 
-def _ask_save_path(tickers: list[str]) -> Optional[str]:
+def _ask_save_path(tickers: list[str]) -> str | None:
     """Apre una finestra Save As nativa per scegliere il path del JSON di output."""
     try:
         import tkinter as tk
