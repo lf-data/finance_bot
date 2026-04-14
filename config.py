@@ -15,3 +15,10 @@ TAVILY_API_KEY = os.getenv("TAVILY_API_KEY", "")
 ANALYSIS_LANGUAGE  = os.getenv("ANALYSIS_LANGUAGE",  "italian")
 SCREENER_BENCHMARK = os.getenv("SCREENER_BENCHMARK", "SWDA.MI")
 SCREENER_WORKERS   = int(os.getenv("SCREENER_WORKERS", "6"))
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+POSTGRES_USER     = os.getenv("POSTGRES_USER",     "postgres")
+POSTGRES_PASSWORD = os.getenv("POSTGRES_PASSWORD", "")
+POSTGRES_DB       = os.getenv("POSTGRES_DB",       "finanalysis")
+POSTGRES_HOST     = os.getenv("POSTGRES_HOST",     "localhost")
+POSTGRES_PORT     = int(os.getenv("POSTGRES_PORT", "5432"))

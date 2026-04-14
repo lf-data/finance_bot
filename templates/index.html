@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="it" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VQM Screener</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: { sans: ['Inter','sans-serif'] },
+          colors: {
+            surface: { 900:'#09090f', 800:'#101018', 700:'#17171f', 600:'#1c1c27', 500:'#23232f' },
+            accent:  { DEFAULT:'#00d084', dim:'#00a367' },
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { background: #09090f; font-family: 'Inter', sans-serif; }
+
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #23232f; border-radius: 9999px; }
+    ::-webkit-scrollbar-thumb:hover { background: #2e2e3e; }
+
+    /* Score ring */
+    .score-ring { stroke-dasharray: 251.2; stroke-linecap: round; transition: stroke-dashoffset .8s cubic-bezier(.4,0,.2,1); }
+
+    /* Pills */
+    .pill-buy  { background:rgba(0,208,132,.14); color:#00d084; border:1px solid rgba(0,208,132,.28); }
+    .pill-hold { background:rgba(251,191,36,.11); color:#fbbf24; border:1px solid rgba(251,191,36,.28); }
+    .pill-sell { background:rgba(239,68,68,.12);  color:#f87171; border:1px solid rgba(239,68,68,.28); }
+    .pill-nd   { background:rgba(107,114,128,.09); color:#6b7280; border:1px solid rgba(107,114,128,.2); }
+
+    /* Cards */
+    .stock-card {
+      background: linear-gradient(160deg, #161621 0%, #101018 100%);
+      border: 1px solid rgba(255,255,255,.055);
+      border-radius: 20px;
+      cursor: pointer;
+      transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+      position: relative;
+      overflow: hidden;
+    }
+    .stock-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse at top right, rgba(0,208,132,.04) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .stock-card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,.75); border-color: rgba(255,255,255,.11); }
+    .stock-card:active { transform: translateY(-2px) scale(.99); }
+    .stock-card.in-portfolio { border-color: rgba(251,191,36,.38); box-shadow: 0 0 0 1px rgba(251,191,36,.15); }
+
+    /* Pillar */
+    .pillar-track { background:rgba(255,255,255,.05); border-radius:999px; height:3px; overflow:hidden; }
+    .pillar-fill  { height:100%; border-radius:999px; transition:width .7s cubic-bezier(.4,0,.2,1); }
+
+    /* Filter tabs */
+    .filter-btn {
+      padding: .38rem 1.1rem; border-radius:999px; font-size:.78rem; font-weight:600;
+      letter-spacing:.02em; transition:all .15s ease; border:1px solid transparent;
+      color:#52525e; background:transparent; cursor:pointer; white-space:nowrap;
+    }
+    .filter-btn:hover { color:#e5e7eb; background:rgba(255,255,255,.06); }
+    .filter-btn.f-active-ALL  { background:rgba(0,208,132,.14);  color:#00d084; border-color:rgba(0,208,132,.28); }
+    .filter-btn.f-active-BUY  { background:rgba(0,208,132,.14);  color:#00d084; border-color:rgba(0,208,132,.28); }
+    .filter-btn.f-active-HOLD { background:rgba(251,191,36,.11); color:#fbbf24; border-color:rgba(251,191,36,.28); }
+    .filter-btn.f-active-SELL { background:rgba(239,68,68,.12);  color:#f87171; border-color:rgba(239,68,68,.28); }
+
+    /* Glass */
+    .glass { background:rgba(10,10,16,.88); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px); }
+
+    /* Metric tile */
+    .m-tile { background:rgba(255,255,255,.028); border:1px solid rgba(255,255,255,.055); border-radius:12px; padding:.6rem .8rem; }
+    .m-tile .lbl { font-size:.66rem; color:#3f3f52; font-weight:600; text-transform:uppercase; letter-spacing:.05em; }
+    .m-tile .val { font-size:.88rem; font-weight:600; color:#d1d5db; margin-top:.15rem; }
+    .m-tile .val.dim { color:#2e2e3e; }
+
+    /* Section heading */
+    .s-head { font-size:.65rem; font-weight:700; letter-spacing:.1em; text-transform:uppercase; display:flex; align-items:center; gap:.6rem; }
+    .s-head::after { content:''; flex:1; height:1px; background:rgba(255,255,255,.05); }
+
+    /* Gradient text */
+    .grad { background:linear-gradient(135deg,#00d084 0%,#00a3ff 100%); -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text; }
+
+    /* Card entrance */
+    @keyframes fadeUp { from{opacity:0;transform:translateY(10px)} to{opacity:1;transform:translateY(0)} }
+    .card-enter { animation: fadeUp .28s ease both; }
+
+    /* Drawer */
+    #drawer { border-left:1px solid rgba(255,255,255,.06); }
+    #portfolio-panel { border-top:1px solid rgba(255,255,255,.06); }
+  </style>
+</head>
+
+<body class="min-h-full antialiased text-gray-100">
+
+<!-- ═══════════════════════════ NAV ══════════════════════════════════════════ -->
+<nav class="sticky top-0 z-50 glass" style="box-shadow:0 1px 0 rgba(255,255,255,.05)">
+  <div class="max-w-screen-xl mx-auto px-5 py-3 flex items-center gap-4">
+
+    <!-- Logo -->
+    <div class="flex items-center gap-2.5 shrink-0">
+      <div class="w-7 h-7 rounded-lg flex items-center justify-center shrink-0"
+           style="background:linear-gradient(135deg,#00d084,#00a3ff);box-shadow:0 0 12px rgba(0,208,132,.4)">
+        <svg width="13" height="13" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1L13 4V10L7 13L1 10V4L7 1Z" stroke="white" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="7" cy="7" r="2" fill="white"/>
+        </svg>
+      </div>
+      <span class="font-extrabold text-[15px] tracking-tight grad">VQM Screener</span>
+    </div>
+
+    <!-- Stats strip -->
+    <div class="hidden md:flex items-center gap-2 text-[11px] bg-white/[.028] border border-white/[.06] rounded-full px-4 py-1.5 shrink-0">
+      <span id="nav-total" class="text-gray-400 font-semibold">—</span>
+      <span class="text-gray-700">·</span>
+      <span id="nav-buy"  class="font-bold" style="color:#00d084">— BUY</span>
+      <span class="text-gray-700">·</span>
+      <span id="nav-hold" class="font-bold text-yellow-400">— HOLD</span>
+      <span class="text-gray-700">·</span>
+      <span id="nav-sell" class="font-bold text-red-400">— SELL</span>
+    </div>
+
+    <div class="ml-auto flex items-center gap-3">
+      <button id="portfolio-nav-btn" onclick="openPortfolio()"
+        class="relative flex items-center gap-1.5 text-[11px] font-bold px-3.5 py-2 rounded-full
+               border border-white/[.07] text-gray-500 transition-all duration-200
+               hover:text-yellow-400 hover:border-yellow-400/30 hover:bg-yellow-400/5">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor">
+          <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+        </svg>
+        Portafoglio
+        <span id="portfolio-badge"
+          class="hidden absolute -top-1.5 -right-1.5 bg-yellow-400 text-black font-black rounded-full
+                 min-w-[18px] h-[18px] flex items-center justify-center text-[10px] px-1 leading-none">0</span>
+      </button>
+      <span class="hidden sm:block text-[11px] text-gray-700 font-medium" id="last-run-label"></span>
+    </div>
+  </div>
+</nav>
+
+<!-- ═══════════════════════════ MAIN ════════════════════════════════════════ -->
+<main class="max-w-screen-xl mx-auto px-5 py-7 space-y-6">
+
+  <!-- Toolbar -->
+  <div class="flex flex-wrap gap-3 items-center">
+    <!-- Search -->
+    <div class="relative flex-1 min-w-[200px]">
+      <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-700 pointer-events-none"
+           width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input id="search-input" type="text" placeholder="Cerca ticker o nome…"
+        class="w-full bg-white/[.03] border border-white/[.07] rounded-full pl-9 pr-4 py-2.5 text-sm
+               focus:outline-none focus:ring-2 focus:ring-green-500/30 focus:border-green-500/25
+               placeholder-gray-700 text-gray-200 transition">
+    </div>
+
+    <!-- Filter buttons -->
+    <div class="flex gap-1 p-1 bg-white/[.025] border border-white/[.06] rounded-full">
+      <button data-filter="ALL"  class="filter-btn">Tutti</button>
+      <button data-filter="BUY"  class="filter-btn">BUY</button>
+      <button data-filter="HOLD" class="filter-btn">HOLD</button>
+      <button data-filter="SELL" class="filter-btn">SELL</button>
+    </div>
+
+    <!-- Sort -->
+    <div class="relative">
+      <select id="sort-select"
+        class="appearance-none bg-white/[.03] border border-white/[.07] rounded-full pl-4 pr-8 py-2.5
+               text-xs font-semibold text-gray-500 focus:outline-none cursor-pointer hover:border-white/[.11]
+               focus:ring-2 focus:ring-green-500/30 transition">
+        <option value="score">↓ Score</option>
+        <option value="score-asc">↑ Score</option>
+        <option value="ticker">A–Z Ticker</option>
+      </select>
+      <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-700"
+           width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </div>
+  </div>
+
+  <!-- Cards grid -->
+  <div id="cards-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+
+  <!-- Loading -->
+  <div id="loading" class="flex flex-col items-center justify-center py-32 gap-5">
+    <div class="relative w-12 h-12">
+      <div class="absolute inset-0 rounded-full border-2 border-surface-700"></div>
+      <div class="absolute inset-0 rounded-full border-2 border-t-green-400 border-r-transparent border-b-transparent border-l-transparent animate-spin"></div>
+      <div class="absolute inset-2 rounded-full border border-green-400/20 animate-ping"></div>
+    </div>
+    <span class="text-xs text-gray-600 font-semibold tracking-widest uppercase">Caricamento</span>
+  </div>
+
+  <!-- Empty state -->
+  <div id="empty-state" class="hidden flex flex-col items-center justify-center py-32 gap-5 text-center">
+    <div class="w-14 h-14 rounded-2xl bg-surface-700 border border-white/[.05] flex items-center justify-center">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#3f3f52" stroke-width="1.5">
+        <rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 9h6M9 13h4"/>
+      </svg>
+    </div>
+    <div>
+      <p class="text-gray-500 text-sm">Nessun dato disponibile.</p>
+      <p class="text-gray-700 text-xs mt-1">Esegui <code class="text-green-400 font-mono bg-green-400/8 px-1.5 py-0.5 rounded">python screener.py</code></p>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══════════════════════════ DETAIL DRAWER ════════════════════════════════ -->
+<div id="drawer-overlay" class="hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onclick="closeDrawer()"></div>
+<aside id="drawer"
+  class="fixed top-0 right-0 h-full w-full sm:w-[490px] bg-surface-800 z-50
+         translate-x-full transition-transform duration-300 ease-in-out flex flex-col">
+
+  <div class="glass border-b border-white/[.06] px-5 py-3.5 flex items-center gap-3 shrink-0">
+    <button onclick="closeDrawer()"
+      class="w-8 h-8 flex items-center justify-center rounded-lg text-gray-600 hover:text-gray-200
+             hover:bg-white/[.06] transition shrink-0">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+    <div class="flex-1 min-w-0">
+      <div id="drawer-title" class="font-bold text-[15px] truncate leading-tight"></div>
+      <div id="drawer-subtitle" class="text-[11px] text-gray-600 truncate"></div>
+    </div>
+    <span id="drawer-pill" class="px-2.5 py-1 rounded-full text-[11px] font-bold shrink-0"></span>
+  </div>
+
+  <div id="drawer-body" class="flex-1 overflow-y-auto p-5 space-y-5"></div>
+</aside>
+
+<!-- ═══════════════════════════ PORTFOLIO PANEL ══════════════════════════════ -->
+<div id="portfolio-overlay" class="hidden fixed inset-0 bg-black/70 z-40 backdrop-blur-sm" onclick="closePortfolio()"></div>
+<div id="portfolio-panel"
+  class="fixed bottom-0 left-0 right-0 max-h-[88vh] bg-surface-800 z-50 shadow-2xl
+         translate-y-full transition-transform duration-300 ease-in-out rounded-t-[28px] flex flex-col">
+
+  <div class="flex justify-center pt-3 pb-0.5 shrink-0">
+    <div class="w-9 h-1 bg-white/[.08] rounded-full"></div>
+  </div>
+
+  <div class="px-6 py-4 flex items-center gap-3 shrink-0">
+    <div class="flex-1">
+      <h2 class="font-extrabold text-[17px] tracking-tight">Portafoglio</h2>
+      <p id="port-count" class="text-[11px] text-gray-600 mt-0.5 font-medium">0 titoli selezionati</p>
+    </div>
+    <button onclick="clearPortfolio()"
+      class="text-[11px] font-semibold text-red-400/60 hover:text-red-400 transition
+             px-3 py-1.5 border border-red-400/15 hover:border-red-400/35 rounded-full">Svuota</button>
+    <button onclick="closePortfolio()"
+      class="w-8 h-8 flex items-center justify-center rounded-full bg-white/[.05]
+             text-gray-500 hover:text-white hover:bg-white/[.09] transition">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M18 6L6 18M6 6l12 12"/></svg>
+    </button>
+  </div>
+
+  <div class="h-px mx-6 bg-white/[.05] shrink-0"></div>
+  <div id="portfolio-body" class="flex-1 overflow-y-auto px-6 py-5 space-y-5"></div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

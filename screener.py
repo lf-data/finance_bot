@@ -14,10 +14,8 @@ Usage
 """
 
 import argparse
-import datetime
 import json
 import logging
-import math
 import os
 import sys
 import time
@@ -27,6 +25,7 @@ import yfinance as yf
 import colorama
 from colorama import Fore, Style
 
+import db as db_module
 from config import (
     ANALYSIS_LANGUAGE,
     LLM_API_KEY,
@@ -261,7 +260,6 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         result["peg"]              = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
         result["52w_change"]       = _safe(info.get("52WeekChange"),     multiplier=100)
         result["prezzo"]           = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
-        result["target_price"]     = _safe(info.get("targetMeanPrice"))
 
     except Exception as exc:
         result["_errore"] = str(exc)
@@ -459,156 +457,78 @@ def _ai_comment(row: dict) -> str:
         return ""
 
 
-# ── EXPORT JSON ──────────────────────────────────────────────────────────────
-
-def _clean(v):
-    """Rende un valore serializzabile in JSON (gestisce NaN, inf, pandas NA)."""
-    if v is None:
-        return None
-    try:
-        f = float(v)
-        if math.isnan(f) or math.isinf(f):
-            return None
-        # Arrotonda float a 2 decimali
-        return round(f, 2)
-    except (TypeError, ValueError):
-        pass
-    if isinstance(v, str):
-        return v
-    return None
-
-
 _VALUE_KEYS    = ["ev_ebitda", "p_fcf", "pe", "p_book"]
 _QUALITY_KEYS  = ["roe", "ebitda_margin", "gross_margin", "de_ratio", "eps_cagr_5y"]
 _MOMENTUM_KEYS = ["mom_12m1m", "eps_rev", "rel_strength"]
 _EXTRA_KEYS    = [
     "operating_margin", "profit_margin", "rev_growth", "roa",
     "current_ratio", "dividend_yield", "peg", "52w_change",
-    "target_price",
 ]
-
-
-def export_json(results: list[dict], path: str, benchmark: str, ai_enabled: bool = False) -> None:
-    """
-    Produce un JSON strutturato:
-      metadata  → informazioni run
-      ranking   → lista titoli ordinata per score (con commento_ai se --ai)
-      riepilogo → {BUY: [...], HOLD: [...], SELL: [...]}
-      metriche_mancanti → {ticker: [metrica, ...]}
-    """
-    ranking:   list[dict]      = []
-    riepilogo: dict[str, list] = {"BUY": [], "HOLD": [], "SELL": [], "N/D": []}
-    missing:   dict[str, list] = {}
-
-    vqm_metrics = _VALUE_KEYS + _QUALITY_KEYS + _MOMENTUM_KEYS
-
-    for r in results:
-        t = r.get("ticker", "?")
-        mancanti = [m for m in vqm_metrics if r.get(m) is None]
-        if mancanti:
-            missing[t] = mancanti
-
-        entry: dict = {
-            "rank":            r.get("rank"),
-            "ticker":          r.get("ticker"),
-            "nome":            r.get("nome"),
-            "settore":         r.get("settore"),
-            "industria":       r.get("industria"),
-            "prezzo":          _clean(r.get("prezzo")),
-            "mktcap":          r.get("mktcap"),
-            "valuta":          r.get("valuta", "EUR"),
-            "value": {
-                **{k: _clean(r.get(k)) for k in _VALUE_KEYS},
-                "score": _clean(r.get("score_value")),
-            },
-            "quality": {
-                **{k: _clean(r.get(k)) for k in _QUALITY_KEYS},
-                "score": _clean(r.get("score_quality")),
-            },
-            "momentum": {
-                **{k: _clean(r.get(k)) for k in _MOMENTUM_KEYS},
-                "score": _clean(r.get("score_momentum")),
-            },
-            "score_finale":    _clean(r.get("score_finale")),
-            "classificazione": r.get("classificazione", "N/D"),
-            "extra":           {k: _clean(r.get(k)) for k in _EXTRA_KEYS if r.get(k) is not None},
-        }
-        if ai_enabled:
-            entry["commento_ai"] = r.get("commento_ai", "")
-        if r.get("_errore"):
-            entry["errore"] = r["_errore"]
-
-        ranking.append(entry)
-        riepilogo.setdefault(r.get("classificazione", "N/D"), []).append(t)
-
-    output = {
-        "metadata": {
-            "generato_il":   datetime.date.today().isoformat(),
-            "benchmark":     benchmark,
-            "n_tickers":     len(results),
-            "ai_commentary": ai_enabled,
-            "pesi_score":    {"value": 0.30, "quality": 0.40, "momentum": 0.30},
-            "soglie":        {"BUY": ">=7.5", "HOLD": "5.0-7.4", "SELL": "<5.0"},
-            "fonti": [
-                "Yahoo Finance Statistics (EV/EBITDA, P/E, P/B, ROE, EBITDA Margin, Gross Margin, D/E)",
-                "yfinance calcolato (P/FCF = marketCap/freeCashflow)",
-                "yfinance income_stmt (EPS CAGR 5Y)",
-                "yfinance prezzi storici (Momentum 12M-1M, Relative Strength)",
-                "yfinance earningsQuarterlyGrowth o forwardEps/trailingEps (EPS Rev proxy)",
-            ],
-        },
-        "ranking":           ranking,
-        "riepilogo":         {k: v for k, v in riepilogo.items() if v},
-        "metriche_mancanti": missing,
-    }
-
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
-
-
-# ── SAVE DIALOG ──────────────────────────────────────────────────────────────
-
-def _ask_save_path(tickers: list[str]) -> str | None:
-    """Apre una finestra Save As nativa per scegliere il path del JSON di output."""
-    try:
-        import tkinter as tk
-        from tkinter import filedialog
-        n = len(tickers)
-        joined = "_".join(tickers)
-        safe_tickers = f"{n}tickers" if len(joined) > 80 else joined
-        default_name = f"{datetime.date.today().isoformat()}_{safe_tickers}.json"
-        root = tk.Tk()
-        root.withdraw()
-        root.attributes("-topmost", True)
-        path = filedialog.asksaveasfilename(
-            parent=root,
-            title="Salva risultati VQM",
-            initialfile=default_name,
-            defaultextension=".json",
-            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
-        )
-        root.destroy()
-        return path if path else None
-    except Exception:
-        return None
 
 
 # ── CORE SCREENER ─────────────────────────────────────────────────────────────
 
-def _fetch_and_score(ticker: str, benchmark: str) -> tuple[str, dict, float]:
+# Mappa suffisso ticker → benchmark Yahoo Finance
+_SUFFIX_BENCHMARK: dict[str, str] = {
+    # Italia
+    ".MI":  "FTSEMIB.MI",
+    # Germania
+    ".DE":  "^GDAXI",
+    ".F":   "^GDAXI",
+    ".BE":  "^GDAXI",
+    # Francia
+    ".PA":  "^FCHI",
+    # Spagna
+    ".MC":  "^IBEX",
+    # UK
+    ".L":   "^FTSE",
+    # Svizzera
+    ".SW":  "^SSMI",
+    # Paesi Bassi
+    ".AS":  "^AEX",
+    # Portogallo
+    ".LS":  "^PSI20",
+    # Giappone
+    ".T":   "^N225",
+    # Hong Kong
+    ".HK":  "^HSI",
+    # Canada
+    ".TO":  "^GSPTSE",
+    ".V":   "^GSPTSE",
+    # Australia
+    ".AX":  "^AXJO",
+    # Brasile
+    ".SA":  "^BVSP",
+}
+_US_BENCHMARK = "SPY"   # nessun suffisso → mercato USA
+
+
+def _benchmark_for_ticker(ticker: str, override: str | None = None) -> str:
+    """Restituisce il benchmark appropriato per il ticker in base al suffisso."""
+    if override:
+        return override
+    upper = ticker.upper()
+    for suffix, bench in _SUFFIX_BENCHMARK.items():
+        if upper.endswith(suffix.upper()):
+            return bench
+    return _US_BENCHMARK
+
+
+def _fetch_and_score(ticker: str, benchmark_override: str | None) -> tuple[str, dict, float]:
     """Fetch + score per un singolo ticker. Usato da ThreadPoolExecutor."""
-    t0  = time.perf_counter()
+    t0        = time.perf_counter()
+    benchmark = _benchmark_for_ticker(ticker, benchmark_override)
     m   = fetch_metrics(ticker, benchmark)
     s   = calc_vqm_score(m)
     row = {**m, **s}
     row["classificazione"] = _classify(s.get("score_finale"))
+    row["benchmark"] = benchmark
     return ticker, row, time.perf_counter() - t0
 
 
 def run_screener(
     tickers: list[str],
-    benchmark: str   = SCREENER_BENCHMARK,
-    output_path: str = "screener_vqm.json",
+    benchmark_override: str | None = None,
     ai: bool         = False,
     workers: int     = SCREENER_WORKERS,
 ) -> list[dict]:
@@ -617,7 +537,8 @@ def run_screener(
       1. Fetch parallelo metriche da Yahoo Finance
       2. Scoring VQM deterministico
       3. [opzionale] Commento AI per ticker (Tavily + LLM)
-      4. Export JSON strutturato
+      4. Salvataggio su PostgreSQL
+    benchmark_override: se None ogni ticker usa il benchmark della propria nazione.
     """
     total   = len(tickers)
     results: dict[str, dict] = {}
@@ -625,44 +546,22 @@ def run_screener(
     # ── Fase 1: fetch parallelo ────────────────────────────────────────────
     _print_status(f"Recupero dati  0/{total}")
     done = 0
+    fetch_log: list[tuple] = []   # (ticker, row, elapsed, error)
 
     with ThreadPoolExecutor(max_workers=min(total, workers)) as exe:
-        futures = {exe.submit(_fetch_and_score, t, benchmark): t for t in tickers}
+        futures = {exe.submit(_fetch_and_score, t, benchmark_override): t for t in tickers}
         for future in as_completed(futures):
             ticker = futures[future]
             try:
                 _, row, elapsed = future.result()
                 results[ticker] = row
                 done += 1
-                sf  = row.get("score_finale")
-                cls = row.get("classificazione", "N/D")
-                cls_color = (
-                    Fore.GREEN  if cls == "BUY"  else
-                    Fore.YELLOW if cls == "HOLD" else
-                    Fore.RED    if cls == "SELL" else
-                    Fore.WHITE
-                )
-                score_str = f"{sf:.1f}" if sf is not None else "N/D"
-                _clear_line()
-                print(
-                    f"  {Fore.CYAN}●{Style.RESET_ALL}  "
-                    f"{Fore.WHITE}{ticker:<12}{Style.RESET_ALL}"
-                    f"{Style.DIM}{row.get('nome',''):<28}{Style.RESET_ALL}"
-                    f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
-                    f"{cls_color}{cls:<4}{Style.RESET_ALL}"
-                    f"  {Style.DIM}({elapsed:.1f}s){Style.RESET_ALL}"
-                )
-                _print_status(f"Recupero dati  {done}/{total}")
+                fetch_log.append((ticker, row, elapsed, None))
             except Exception as exc:
                 done += 1
-                _clear_line()
-                print(
-                    f"  {Fore.RED}✗{Style.RESET_ALL}  "
-                    f"{Fore.RED}{ticker:<12}{Style.RESET_ALL}"
-                    f"{Style.DIM}{str(exc)[:50]}{Style.RESET_ALL}"
-                )
                 results[ticker] = {"ticker": ticker, "_errore": str(exc)}
-                _print_status(f"Recupero dati  {done}/{total}")
+                fetch_log.append((ticker, {"ticker": ticker, "_errore": str(exc)}, 0.0, str(exc)))
+            _print_status(f"Recupero dati  {done}/{total}")
 
     _clear_line()
 
@@ -674,6 +573,37 @@ def run_screener(
     )
     for i, r in enumerate(ordered, 1):
         r["rank"] = i
+
+    # Stampa tutti i risultati ordinati per score, colonna nome allineata al più lungo
+    elapsed_map = {ticker: elapsed for ticker, _, elapsed, err in fetch_log if not err}
+    valid_rows = [r for r in ordered if not r.get("_errore")]
+    nome_col = max(28, max((len(r.get("nome", "")) for r in valid_rows), default=0) + 2)
+    for r in ordered:
+        if r.get("_errore"):
+            print(
+                f"  {Fore.RED}✗{Style.RESET_ALL}  "
+                f"{Fore.RED}{r['ticker']:<12}{Style.RESET_ALL}"
+                f"{Style.DIM}{r['_errore'][:50]}{Style.RESET_ALL}"
+            )
+        else:
+            sf  = r.get("score_finale")
+            cls = r.get("classificazione", "N/D")
+            cls_color = (
+                Fore.GREEN  if cls == "BUY"  else
+                Fore.YELLOW if cls == "HOLD" else
+                Fore.RED    if cls == "SELL" else
+                Fore.WHITE
+            )
+            score_str = f"{sf:.1f}" if sf is not None else "N/D"
+            elapsed = elapsed_map.get(r["ticker"], 0.0)
+            print(
+                f"  {Fore.CYAN}●{Style.RESET_ALL}  "
+                f"{Fore.WHITE}{r['ticker']:<12}{Style.RESET_ALL}"
+                f"{Style.DIM}{r.get('nome',''):<{nome_col}}{Style.RESET_ALL}"
+                f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
+                f"{cls_color}{cls:<4}{Style.RESET_ALL}"
+                f"  {Style.DIM}({elapsed:.1f}s){Style.RESET_ALL}"
+            )
 
     # ── Fase 2: commento AI (opzionale) ───────────────────────────────────
     if ai:
@@ -707,13 +637,37 @@ def run_screener(
 
             _clear_line()
 
-    # ── Fase 3: export JSON ────────────────────────────────────────────────
-    export_json(ordered, output_path, benchmark, ai_enabled=ai)
+    # ── Fase 3: salvataggio su PostgreSQL ───────────────────────────────
+    run_id = db_module.save_run(ordered, benchmark_override or "auto", ai_enabled=ai)
 
-    return ordered
+    return ordered, run_id
 
 
 # ── ENTRY POINT ───────────────────────────────────────────────────────────────
+
+def _print_results_summary(results: list[dict]) -> None:
+    """Stampa la lista risultati (usata anche per dati caricati dal DB)."""
+    if not results:
+        return
+    nome_col = max(28, max(len(r.get("nome", "") or "") for r in results) + 2)
+    for r in results:
+        sf  = r.get("score_finale")
+        cls = r.get("classificazione", "N/D")
+        cls_color = (
+            Fore.GREEN  if cls == "BUY"  else
+            Fore.YELLOW if cls == "HOLD" else
+            Fore.RED    if cls == "SELL" else
+            Fore.WHITE
+        )
+        score_str = f"{sf:.1f}" if sf is not None else "N/D"
+        print(
+            f"  {Fore.CYAN}●{Style.RESET_ALL}  "
+            f"{Fore.WHITE}{(r.get('ticker') or ''):<12}{Style.RESET_ALL}"
+            f"{Style.DIM}{(r.get('nome') or ''):<{nome_col}}{Style.RESET_ALL}"
+            f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
+            f"{cls_color}{cls:<4}{Style.RESET_ALL}"
+        )
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -724,7 +678,6 @@ def main() -> None:
             "  python screener.py\n"
             "  python screener.py ISP.MI UCG.MI ENI.MI\n"
             "  python screener.py --ai\n"
-            "  python screener.py --ai --out report.json\n"
             "  python screener.py --benchmark SPY\n"
         ),
     )
@@ -741,16 +694,16 @@ def main() -> None:
         help="Genera un commento AI per ogni ticker (Tavily search + LLM).",
     )
     parser.add_argument(
-        "--out",
-        type=str,
-        default="screener_vqm.json",
-        help="File JSON di output (default: screener_vqm.json).",
-    )
-    parser.add_argument(
         "--benchmark",
         type=str,
-        default=SCREENER_BENCHMARK,
-        help=f"Ticker benchmark per Relative Strength (default: {SCREENER_BENCHMARK}).",
+        default=None,
+        help="Forza un benchmark unico per tutti i ticker (es. SPY). Default: auto per nazione.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Riesegui anche se esiste già un run di oggi nel DB.",
     )
     args = parser.parse_args()
 
@@ -760,14 +713,16 @@ def main() -> None:
         else DEFAULT_TICKERS
     )
 
-    # ── Save dialog ─────────────────────────────────────────────────────────
-    save_path = _ask_save_path(tickers) or args.out
-
     # ── Header ─────────────────────────────────────────────────────────────
     print()
     print(f"{Fore.CYAN}{Style.BRIGHT}◆  Finance Bot — VQM Screener{Style.RESET_ALL}")
     print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
     ticker_fmt = "  ".join(tickers) if len(tickers) <= 6 else f"{len(tickers)} titoli"
+    bench_label = (
+        f"{Fore.WHITE}{args.benchmark}{Style.RESET_ALL}"
+        if args.benchmark else
+        f"{Style.DIM}auto (per nazione){Style.RESET_ALL}"
+    )
     ai_label = (
         f"{Fore.GREEN}{Style.BRIGHT}abilitato{Style.RESET_ALL}"
         if args.ai else
@@ -775,19 +730,35 @@ def main() -> None:
     )
     print(
         f"{Style.DIM}Tickers:{Style.RESET_ALL}   {Fore.WHITE}{ticker_fmt}{Style.RESET_ALL}\n"
-        f"{Style.DIM}Benchmark:{Style.RESET_ALL} {Fore.WHITE}{args.benchmark}{Style.RESET_ALL}\n"
-        f"{Style.DIM}Output:{Style.RESET_ALL}    {Fore.WHITE}{save_path}{Style.RESET_ALL}\n"
+        f"{Style.DIM}Benchmark:{Style.RESET_ALL} {bench_label}\n"
+        f"{Style.DIM}DB:{Style.RESET_ALL}        {Fore.WHITE}{db_module.POSTGRES_DB}@{db_module.POSTGRES_HOST}:{db_module.POSTGRES_PORT}{Style.RESET_ALL}\n"
         f"{Style.DIM}AI:{Style.RESET_ALL}        {ai_label}"
     )
     print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}\n")
 
+    # ── Check run odierno ───────────────────────────────────────────────────
+    if not args.force and not args.tickers:
+        today_run = db_module.load_today_run()
+        if today_run is not None:
+            run_id, results = today_run
+            elapsed_total = 0.0
+            print(
+                f"  {Fore.YELLOW}⟳{Style.RESET_ALL}  "
+                f"{Style.DIM}Run di oggi già presente (run_id={run_id}). "
+                f"Uso i dati esistenti.  (usa --force per rieseguire){Style.RESET_ALL}"
+            )
+            _print_results_summary(results)
+            print(f"\n  {Fore.GREEN}✓{Style.RESET_ALL}  DB: {Fore.WHITE}{db_module.POSTGRES_DB} (run_id={run_id}){Style.RESET_ALL}")
+            print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
+            print(f"{Fore.CYAN}{Style.BRIGHT}  Screener completato.{Style.RESET_ALL}\n")
+            return
+
     t_start = time.perf_counter()
 
     try:
-        results = run_screener(
+        results, run_id = run_screener(
             tickers,
-            benchmark=args.benchmark,
-            output_path=save_path,
+            benchmark_override=args.benchmark,
             ai=args.ai,
         )
     except KeyboardInterrupt:
@@ -797,30 +768,9 @@ def main() -> None:
 
     elapsed_total = time.perf_counter() - t_start
 
-    # ── TOP 10 ──────────────────────────────────────────────────────────────
-    print(f"\n{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
-    print(f"{Fore.CYAN}{Style.BRIGHT}  TOP 10{Style.RESET_ALL}")
-    print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
-    for r in results[:10]:
-        sf  = r.get("score_finale")
-        cls = r.get("classificazione", "N/D")
-        cls_color = (
-            Fore.GREEN  if cls == "BUY"  else
-            Fore.YELLOW if cls == "HOLD" else
-            Fore.RED    if cls == "SELL" else
-            Fore.WHITE
-        )
-        score_str = f"{sf:.1f}" if sf is not None else "N/D"
-        print(
-            f"  {Style.DIM}{r.get('rank'):>2}.{Style.RESET_ALL}  "
-            f"{Fore.WHITE}{r.get('ticker'):<12}{Style.RESET_ALL}"
-            f"{Style.DIM}{r.get('nome',''):<28}{Style.RESET_ALL}"
-            f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
-            f"{cls_color}{cls}{Style.RESET_ALL}"
-        )
-
     # ── Footer ──────────────────────────────────────────────────────────────
-    print(f"\n  {Fore.GREEN}✓{Style.RESET_ALL}  File salvato: {Fore.WHITE}{save_path}{Style.RESET_ALL}")
+    db_info = f"{db_module.POSTGRES_DB} (run_id={run_id})"
+    print(f"\n  {Fore.GREEN}✓{Style.RESET_ALL}  Salvato su DB: {Fore.WHITE}{db_info}{Style.RESET_ALL}")
     print(f"{Style.DIM}  ⏱ {elapsed_total:.1f}s{Style.RESET_ALL}")
     print(f"{Style.DIM}{'─' * 62}{Style.RESET_ALL}")
     print(f"{Fore.CYAN}{Style.BRIGHT}  Screener completato.{Style.RESET_ALL}\n")
