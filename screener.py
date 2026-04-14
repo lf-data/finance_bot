@@ -277,11 +277,12 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         cf_a  = a_cf  if (a_cf  is not None and not a_cf.empty)  else None
 
         # Sorgente attiva: quarterly se disponibile, altrimenti annual
-        inc = inc_q or inc_a
-        bs  = bs_q  or bs_a
-        cf  = cf_q  or cf_a
-        n_periods = 4 if inc is inc_q else 1
-        n_cf      = 4 if cf  is cf_q  else 1
+        # Nota: non usare `inc_q or inc_a` — i DataFrame non hanno truth value.
+        inc = inc_q if inc_q is not None else inc_a
+        bs  = bs_q  if bs_q  is not None else bs_a
+        cf  = cf_q  if cf_q  is not None else cf_a
+        n_periods = 4 if inc is inc_q and inc_q is not None else 1
+        n_cf      = 4 if cf  is cf_q  and cf_q  is not None else 1
 
         # ── TTM — somma ultimi 4 trimestri (o 1 anno) ─────────────────────
         ttm_revenue = _ttm(_REV_KEYS,    inc, n_periods)
@@ -417,7 +418,9 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         eps_rev = None
         fwd = info.get("forwardEps")
         trl = info.get("trailingEps")
-        if fwd and trl and trl != 0:
+        # Usare la ratio solo quando trl > 0: con trl negativo (turnaround)
+        # la formula inverte il segno e penalizza un miglioramento reale degli EPS.
+        if fwd and trl and trl > 0:
             eps_rev = round((fwd / trl - 1) * 100, 2)
         if eps_rev is None:
             for key in ("earningsQuarterlyGrowth", "earningsGrowth"):
@@ -451,7 +454,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 
         # Revenue Growth = (TTM Revenue / Prior-year TTM Revenue − 1) * 100
         rev_growth = None
-        if inc_q is not None and not inc_q.empty:
+        if inc_q is not None and not inc_q.empty and inc_q.shape[1] >= 8:
             ttm_rev_now  = _ttm(_REV_KEYS, inc_q, 4)
             ttm_rev_prev = _ttm(_REV_KEYS, inc_q.iloc[:, 4:], 4)   # 4 trimestri precedenti
             if ttm_rev_now and ttm_rev_prev and ttm_rev_prev > 0:
@@ -475,7 +478,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 
 # ── SCORING VQM ──────────────────────────────────────────────────────────────
 # Score 0-10 per ogni metrica, poi score per pillar (VALUE, QUALITY, MOMENTUM).
-# Score finale = 30% VALUE + 40% QUALITY + 30% MOMENTUM (pesi default).
+# Score finale pesato: pesi letti da thresholds.json (default: 30% V + 50% Q + 20% M).
 
 def _score_metric(val: float | None, good: float, bad: float,
                   lower_is_better: bool = False) -> float | None:
