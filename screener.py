@@ -30,7 +30,6 @@ from config import (
     ANALYSIS_LANGUAGE,
     LLM_API_KEY,
     LLM_MODEL,
-    SCREENER_BENCHMARK,
     SCREENER_WORKERS,
     TAVILY_API_KEY,
 )
