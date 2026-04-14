@@ -171,7 +171,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 
         # ── VALUE — disponibili direttamente da info ───────────────────────
         # EV/EBITDA: Yahoo Finance Statistics → Valuation Measures
-        result["ev_ebitda"] = _safe(info.get("enterpriseToEbitda"))
+        result["ev_ebitda"] = _safe(info.get("enterpriseToEbitda")) or None
 
         # P/FCF: calcolato da marketCap / freeCashflow (Yahoo Statistics)
         fcf    = info.get("freeCashflow")
@@ -180,20 +180,20 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
             result["p_fcf"] = round(mktcap / fcf, 2)
 
         # P/E Trailing: Yahoo Finance Statistics → Trailing P/E
-        result["pe"] = _safe(info.get("trailingPE"))
+        result["pe"] = _safe(info.get("trailingPE")) or None
 
         # P/Book: Yahoo Finance Statistics → Price/Book (mrq)
-        result["p_book"] = _safe(info.get("priceToBook"))
+        result["p_book"] = _safe(info.get("priceToBook")) or None
 
         # ── QUALITY — disponibili direttamente da info ─────────────────────
         # ROE: Yahoo Statistics → Return on Equity (ttm) — yfinance dà valore in frazione
-        result["roe"] = _safe(info.get("returnOnEquity"), multiplier=100)
+        result["roe"] = _safe(info.get("returnOnEquity"), multiplier=100) or None
 
         # EBITDA Margin: Yahoo Statistics → EBITDA Margin (ttm)
-        result["ebitda_margin"] = _safe(info.get("ebitdaMargins"), multiplier=100)
+        result["ebitda_margin"] = _safe(info.get("ebitdaMargins"), multiplier=100) or None
 
         # Gross Margin: Yahoo Statistics → Gross Profit Margin (ttm)
-        result["gross_margin"] = _safe(info.get("grossMargins"), multiplier=100)
+        result["gross_margin"] = _safe(info.get("grossMargins"), multiplier=100) or None
 
         # D/E Ratio: Yahoo Statistics → Total Debt/Equity (mrq)
         result["de_ratio"] = _safe(info.get("debtToEquity"))
@@ -230,6 +230,134 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         # Normalizza: Yahoo a volte restituisce D/E come percentuale (82 = 0.82x)
         if result.get("de_ratio") and result["de_ratio"] > 20:
             result["de_ratio"] = round(result["de_ratio"] / 100, 2)
+
+        # ── Fallback calcolati da income_stmt / balance_sheet ────────────────
+        if (result.get("pe") is None or result.get("ev_ebitda") is None
+                or result.get("p_book") is None or result.get("roe") is None
+                or result.get("gross_margin") is None):
+            try:
+                _inc = t.income_stmt
+            except Exception:
+                _inc = None
+            try:
+                _bs = t.balance_sheet
+            except Exception:
+                _bs = None
+            _inc_ok = _inc is not None and not _inc.empty
+            _bs_ok  = _bs  is not None and not _bs.empty
+            _ni_keys = (
+                "Net Income",
+                "Net Income Common Stockholders",
+                "Net Income From Continuing Operations",
+            )
+            _eq_keys = (
+                "Stockholders Equity",
+                "Common Stock Equity",
+                "Total Equity Gross Minority Interest",
+            )
+
+            # P/E: marketCap / Net Income (ttm)
+            if result.get("pe") is None and mktcap and mktcap > 0 and _inc_ok:
+                try:
+                    for _k in _ni_keys:
+                        if _k in _inc.index:
+                            _ni_row = _inc.loc[_k].dropna()
+                            if len(_ni_row) >= 1:
+                                _ni = float(_ni_row.iloc[0])
+                                if _ni > 0:
+                                    result["pe"] = round(mktcap / _ni, 2)
+                            break
+                except Exception:
+                    pass
+
+            # EV/EBITDA: enterpriseValue / EBITDA
+            if result.get("ev_ebitda") is None:
+                try:
+                    _ev  = info.get("enterpriseValue")
+                    _ebt = info.get("ebitda")
+                    if not _ev and _bs_ok and mktcap:
+                        _debt = next(
+                            (float(_bs.loc[_k].iloc[0])
+                             for _k in ("Total Debt", "Long Term Debt")
+                             if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
+                            0.0,
+                        )
+                        _cash = next(
+                            (float(_bs.loc[_k].iloc[0])
+                             for _k in ("Cash And Cash Equivalents",
+                                        "Cash Cash Equivalents And Short Term Investments")
+                             if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
+                            0.0,
+                        )
+                        _ev = mktcap + _debt - _cash
+                    if _ev and _ebt and _ebt > 0:
+                        result["ev_ebitda"] = round(_ev / _ebt, 2)
+                except Exception:
+                    pass
+
+            # P/Book: marketCap / totalEquity
+            if result.get("p_book") is None and mktcap and mktcap > 0 and _bs_ok:
+                try:
+                    _eq = next(
+                        (float(_bs.loc[_k].iloc[0])
+                         for _k in _eq_keys
+                         if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
+                        None,
+                    )
+                    if _eq and _eq > 0:
+                        result["p_book"] = round(mktcap / _eq, 2)
+                except Exception:
+                    pass
+
+            # ROE: Net Income / Equity * 100
+            if result.get("roe") is None and _inc_ok:
+                try:
+                    _ni = None
+                    for _k in _ni_keys:
+                        if _k in _inc.index:
+                            _ni_row = _inc.loc[_k].dropna()
+                            if len(_ni_row) >= 1:
+                                _ni = float(_ni_row.iloc[0])
+                            break
+                    if _ni is not None:
+                        if not _bs_ok:
+                            try:
+                                _bs = t.balance_sheet
+                                _bs_ok = _bs is not None and not _bs.empty
+                            except Exception:
+                                pass
+                        if _bs_ok:
+                            _eq = next(
+                                (float(_bs.loc[_k].iloc[0])
+                                 for _k in _eq_keys
+                                 if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
+                                None,
+                            )
+                            if _eq and _eq > 0:
+                                result["roe"] = round(_ni / _eq * 100, 2)
+                except Exception:
+                    pass
+
+            # Gross Margin: (Revenue - COGS) / Revenue * 100
+            if result.get("gross_margin") is None and _inc_ok:
+                try:
+                    _rev = next(
+                        (float(_inc.loc[_k].iloc[0])
+                         for _k in ("Total Revenue", "Revenue")
+                         if _k in _inc.index and pd.notna(_inc.loc[_k].iloc[0])),
+                        None,
+                    )
+                    _cogs = next(
+                        (float(_inc.loc[_k].iloc[0])
+                         for _k in ("Cost Of Revenue", "Cost Of Goods Sold",
+                                    "Reconciled Cost Of Revenue")
+                         if _k in _inc.index and pd.notna(_inc.loc[_k].iloc[0])),
+                        None,
+                    )
+                    if _rev and _rev > 0 and _cogs is not None:
+                        result["gross_margin"] = round((_rev - _cogs) / _rev * 100, 2)
+                except Exception:
+                    pass
 
         # EPS Revision 3M:
         # yfinance non ha revisioni a 3M; usiamo la migliore approssimazione disponibile:

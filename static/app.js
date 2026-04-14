@@ -617,13 +617,35 @@ function mRow(label, value) {
 }
 
 function mVal(label, value, unit) {
-  const isN = value == null;
+  const isN = value == null || value === 0;
   const txt  = isN ? '—' : fmtNum(value, 2) + '\u00a0' + unit;
   return `
   <div class="m-tile">
     <div class="lbl">${label}</div>
     <div class="val${isN ? ' dim' : ''}">${txt}</div>
   </div>`;
+}
+
+// ── PWA Install ───────────────────────────────────────────────────────────────
+let _pwaPrompt = null;
+
+window.addEventListener('beforeinstallprompt', (e) => {
+  e.preventDefault();
+  _pwaPrompt = e;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.classList.replace('hidden', 'flex');
+});
+
+window.addEventListener('appinstalled', () => {
+  _pwaPrompt = null;
+  const btn = document.getElementById('pwa-install-btn');
+  if (btn) btn.classList.replace('flex', 'hidden');
+});
+
+function pwaInstall() {
+  if (!_pwaPrompt) return;
+  _pwaPrompt.prompt();
+  _pwaPrompt.userChoice.then(() => { _pwaPrompt = null; });
 }
 
 // ── Service Worker registration ────────────────────────────────────────────────
