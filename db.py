@@ -147,6 +147,8 @@ def load_today_run() -> tuple[int, list[dict]] | None:
     Se non esiste, restituisce None.
     """
     try:
+        ensure_db()
+        ensure_schema()
         conn = _connect(POSTGRES_DB)
     except Exception:
         return None

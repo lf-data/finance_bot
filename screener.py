@@ -105,12 +105,24 @@ def _momentum_12m_1m(ticker_obj: yf.Ticker) -> float | None:
         pass
     return None
 
+# Cache storico benchmark: evita di ri-scaricare N volte lo stesso indice
+# quando si analizzano più ticker sullo stesso mercato (thread-safe: worst case
+# è un double-fetch sul primo accesso parallelo, innocuo).
+_bm_history_cache: dict[str, pd.DataFrame] = {}
+
+
 def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> float | None:
-    """Rendimento 12M titolo - rendimento 12M benchmark."""
+    """Rendimento 12M titolo - rendimento 12M benchmark (benchmark cachato)."""
     try:
         hist_t = ticker_obj.history(period="12mo", auto_adjust=True)
-        hist_b = yf.Ticker(benchmark).history(period="12mo", auto_adjust=True)
-        if hist_t.empty or hist_b.empty:
+        if hist_t.empty:
+            return None
+        if benchmark not in _bm_history_cache:
+            _bm_history_cache[benchmark] = yf.Ticker(benchmark).history(
+                period="12mo", auto_adjust=True
+            )
+        hist_b = _bm_history_cache[benchmark]
+        if hist_b.empty:
             return None
         ret_t = (hist_t["Close"].iloc[-1] / hist_t["Close"].iloc[0] - 1) * 100
         ret_b = (hist_b["Close"].iloc[-1] / hist_b["Close"].iloc[0] - 1) * 100
@@ -118,15 +130,17 @@ def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> float
     except Exception:
         return None
 
-def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict) -> float | None:
+def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict,
+                 annual_inc=None) -> float | None:
     """
     CAGR EPS a 5 anni — 2 livelli di fallback:
-    1. Net Income / shares da income_stmt (fino a 4 anni → CAGR)
+    1. Net Income / shares da income_stmt annuale (fino a 4 anni → CAGR)
     2. Proxy: earningsGrowth / earningsQuarterlyGrowth / revenueGrowth da info
+    annual_inc: dataframe già fetchato di t.income_stmt (evita double-fetch).
     """
     # Livello 1: Net Income / shares da income_stmt
     try:
-        inc = ticker_obj.income_stmt
+        inc = annual_inc if annual_inc is not None else ticker_obj.income_stmt
         if inc is not None and not inc.empty:
             shares = info.get("sharesOutstanding") or info.get("impliedSharesOutstanding")
             ni_keys = ["Net Income", "Net Income Common Stockholders",
@@ -152,242 +166,306 @@ def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict) -> float | None:
             return _safe(v, multiplier=100)
     return None
 
+# ── CHIAVI STANDARD STATEMENTS ──────────────────────────────────────────────
+
+_NI_KEYS     = ("Net Income", "Net Income Common Stockholders",
+                "Net Income From Continuing Operations")
+_EQ_KEYS     = ("Stockholders Equity", "Common Stock Equity",
+                "Total Equity Gross Minority Interest")
+_REV_KEYS    = ("Total Revenue", "Revenue")
+_GP_KEYS     = ("Gross Profit",)
+_COGS_KEYS   = ("Cost Of Revenue", "Cost Of Goods Sold", "Reconciled Cost Of Revenue")
+_OI_KEYS     = ("Operating Income", "Total Operating Income As Reported", "EBIT")
+_EBITDA_KEYS = ("EBITDA", "Normalized EBITDA")
+_DA_CF_KEYS  = ("Depreciation And Amortization", "Depreciation Amortization Depletion",
+                "Depreciation")
+_DA_INC_KEYS = ("Depreciation And Amortization", "Reconciled Depreciation",
+                "Depreciation Amortization Depletion")
+_OCF_KEYS    = ("Operating Cash Flow", "Cash Flows From Operations",
+                "Net Cash Provided By Operating Activities")
+_CAPEX_KEYS  = ("Capital Expenditure", "Capital Expenditures",
+                "Purchase Of Property Plant And Equipment")
+_DEBT_KEYS   = ("Total Debt", "Long Term Debt", "Total Long Term Debt")
+_CASH_KEYS   = ("Cash And Cash Equivalents",
+                "Cash Cash Equivalents And Short Term Investments")
+_ASSETS_KEYS = ("Total Assets",)
+
+
+def _ttm(keys: tuple, stmt, n: int = 4) -> float | None:
+    """
+    Somma degli ultimi n periodi (4 trimestri = TTM, oppure 1 anno) per una
+    riga di income_stmt o cashflow. Le colonne in yfinance sono ordinate dal
+    più recente al più vecchio, quindi iloc[:n] = ultimi n periodi.
+    """
+    if stmt is None or stmt.empty:
+        return None
+    for key in keys:
+        if key in stmt.index:
+            row = stmt.loc[key].dropna()
+            if len(row) >= 1:
+                take = min(n, len(row))
+                return float(row.iloc[:take].sum())
+    return None
+
+
+def _mrq(keys: tuple, stmt) -> float | None:
+    """Valore del trimestre/periodo più recente da uno statement (balance sheet)."""
+    if stmt is None or stmt.empty:
+        return None
+    for key in keys:
+        if key in stmt.index:
+            row = stmt.loc[key].dropna()
+            if len(row) >= 1 and pd.notna(row.iloc[0]):
+                return float(row.iloc[0])
+    return None
+
+
 def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
     """
-    Scarica tutte le metriche VQM da Yahoo Finance per un singolo ticker.
-    Restituisce un dict con tutte le metriche disponibili.
+    Scarica e calcola tutte le metriche VQM per un singolo ticker.
+
+    Strategia di calcolo (priorità decrescente):
+      1. Calcolo diretto da quarterly statements → TTM per flussi/conto economico,
+         MRQ per balance sheet. Evita discrepanze con i valori pre-calcolati da Yahoo.
+      2. Fallback su annual statements se quarterly non disponibili.
+      3. Fallback su info dict come ultima risorsa.
     """
     result: dict = {"ticker": ticker}
     try:
         t    = yf.Ticker(ticker)
         info = t.info or {}
 
-        # ── Info base ──────────────────────────────────────────────────────
-        result["nome"]    = info.get("shortName") or info.get("longName") or ticker
-        result["settore"] = info.get("sector")    or info.get("quoteType") or "N/D"
-        result["industria"] = info.get("industry") or "N/D"
-        result["mktcap"]  = info.get("marketCap")
-        result["valuta"]  = info.get("currency") or "EUR"
+        # ── Info base (sempre da info — non presenti negli statements) ─────
+        result["nome"]      = info.get("shortName") or info.get("longName") or ticker
+        result["settore"]   = info.get("sector")    or info.get("quoteType") or "N/D"
+        result["industria"] = info.get("industry")  or "N/D"
+        result["mktcap"]    = info.get("marketCap")
+        result["valuta"]    = info.get("currency")  or "EUR"
+        mktcap = result["mktcap"]
 
-        # ── VALUE — disponibili direttamente da info ───────────────────────
-        # EV/EBITDA: Yahoo Finance Statistics → Valuation Measures
-        result["ev_ebitda"] = _safe(info.get("enterpriseToEbitda")) or None
+        # ── Fetch statements ────────────────────────────────────────────────
+        # Quarterly preferito per TTM; annual come fallback
+        try:
+            q_inc = t.quarterly_income_stmt
+        except Exception:
+            q_inc = None
+        try:
+            q_bs = t.quarterly_balance_sheet
+        except Exception:
+            q_bs = None
+        try:
+            q_cf = t.quarterly_cashflow
+        except Exception:
+            q_cf = None
+        try:
+            a_inc = t.income_stmt
+        except Exception:
+            a_inc = None
+        try:
+            a_bs = t.balance_sheet
+        except Exception:
+            a_bs = None
+        try:
+            a_cf = t.cashflow
+        except Exception:
+            a_cf = None
 
-        # P/FCF: calcolato da marketCap / freeCashflow (Yahoo Statistics)
-        fcf    = info.get("freeCashflow")
-        mktcap = info.get("marketCap")
-        if fcf and mktcap and fcf > 0:
-            result["p_fcf"] = round(mktcap / fcf, 2)
+        inc_q = q_inc if (q_inc is not None and not q_inc.empty) else None
+        bs_q  = q_bs  if (q_bs  is not None and not q_bs.empty)  else None
+        cf_q  = q_cf  if (q_cf  is not None and not q_cf.empty)  else None
+        inc_a = a_inc if (a_inc is not None and not a_inc.empty) else None
+        bs_a  = a_bs  if (a_bs  is not None and not a_bs.empty)  else None
+        cf_a  = a_cf  if (a_cf  is not None and not a_cf.empty)  else None
 
-        # P/E Trailing: Yahoo Finance Statistics → Trailing P/E
-        result["pe"] = _safe(info.get("trailingPE")) or None
+        # Sorgente attiva: quarterly se disponibile, altrimenti annual
+        inc = inc_q or inc_a
+        bs  = bs_q  or bs_a
+        cf  = cf_q  or cf_a
+        n_periods = 4 if inc is inc_q else 1
+        n_cf      = 4 if cf  is cf_q  else 1
 
-        # P/Book: Yahoo Finance Statistics → Price/Book (mrq)
-        result["p_book"] = _safe(info.get("priceToBook")) or None
+        # ── TTM — somma ultimi 4 trimestri (o 1 anno) ─────────────────────
+        ttm_revenue = _ttm(_REV_KEYS,    inc, n_periods)
+        ttm_ni      = _ttm(_NI_KEYS,     inc, n_periods)
+        ttm_gp      = _ttm(_GP_KEYS,     inc, n_periods)
+        ttm_cogs    = _ttm(_COGS_KEYS,   inc, n_periods)
+        ttm_oi      = _ttm(_OI_KEYS,     inc, n_periods)
+        ttm_ebitda  = _ttm(_EBITDA_KEYS, inc, n_periods)
+        ttm_ocf     = _ttm(_OCF_KEYS,    cf,  n_cf)
+        ttm_capex   = _ttm(_CAPEX_KEYS,  cf,  n_cf)
+        # D&A: cashflow più affidabile, poi income stmt
+        ttm_da = (_ttm(_DA_CF_KEYS,  cf,  n_cf) or
+                  _ttm(_DA_INC_KEYS, inc, n_periods))
+        # EBITDA: valore diretto o EBIT + D&A
+        if ttm_ebitda is None and ttm_oi is not None and ttm_da is not None:
+            ttm_ebitda = ttm_oi + abs(ttm_da)
 
-        # ── QUALITY — disponibili direttamente da info ─────────────────────
-        # ROE: Yahoo Statistics → Return on Equity (ttm) — yfinance dà valore in frazione
-        result["roe"] = _safe(info.get("returnOnEquity"), multiplier=100) or None
+        # ── MRQ — balance sheet più recente ───────────────────────────────
+        mrq_equity = _mrq(_EQ_KEYS,    bs)
+        mrq_debt   = _mrq(_DEBT_KEYS,  bs)
+        mrq_cash   = _mrq(_CASH_KEYS,  bs)
+        mrq_assets = _mrq(_ASSETS_KEYS, bs)
 
-        # EBITDA Margin: Yahoo Statistics → EBITDA Margin (ttm)
-        result["ebitda_margin"] = _safe(info.get("ebitdaMargins"), multiplier=100) or None
+        # Debt composito: LTD + Current Debt se "Total Debt" non c'è
+        if mrq_debt is None and bs is not None and not bs.empty:
+            _ltd = _mrq(("Long Term Debt And Capital Lease Obligation",
+                         "Long Term Debt"), bs)
+            _std = _mrq(("Current Debt And Capital Lease Obligation",
+                         "Current Debt",
+                         "Current Portion Of Long Term Debt"), bs)
+            if _ltd is not None:
+                mrq_debt = _ltd + (_std or 0.0)
 
-        # Gross Margin: Yahoo Statistics → Gross Profit Margin (ttm)
-        result["gross_margin"] = _safe(info.get("grossMargins"), multiplier=100) or None
+        # ── VALUE ──────────────────────────────────────────────────────────
 
-        # D/E Ratio: Yahoo Statistics → Total Debt/Equity (mrq)
-        result["de_ratio"] = _safe(info.get("debtToEquity"))
+        # P/E = mktcap / TTM Net Income
+        if mktcap and ttm_ni and ttm_ni > 0:
+            result["pe"] = round(mktcap / ttm_ni, 2)
+        if result.get("pe") is None:
+            result["pe"] = _safe(info.get("trailingPE"))
 
-        # EPS CAGR 5Y: calcolato da income statement o proxy
-        result["eps_cagr_5y"] = _eps_cagr_5y(t, info)
+        # EV = mktcap + total_debt − cash (MRQ)
+        ev = None
+        if mktcap:
+            ev = mktcap + (mrq_debt or 0) - (mrq_cash or 0)
+        if ev is None:
+            ev = info.get("enterpriseValue")
+        # EV/EBITDA = EV / TTM EBITDA
+        if ev and ttm_ebitda and ttm_ebitda > 0:
+            result["ev_ebitda"] = round(ev / ttm_ebitda, 2)
+        if result.get("ev_ebitda") is None:
+            result["ev_ebitda"] = _safe(info.get("enterpriseToEbitda"))
+
+        # P/Book = mktcap / MRQ equity
+        if mktcap and mrq_equity and mrq_equity > 0:
+            result["p_book"] = round(mktcap / mrq_equity, 2)
+        if result.get("p_book") is None:
+            result["p_book"] = _safe(info.get("priceToBook"))
+
+        # P/FCF = mktcap / TTM FCF  (FCF = OCF − |CapEx|)
+        if ttm_ocf is not None and ttm_capex is not None:
+            ttm_fcf = (ttm_ocf + ttm_capex          # CapEx negativo in yfinance
+                       if ttm_capex < 0
+                       else ttm_ocf - ttm_capex)
+            if mktcap and ttm_fcf > 0:
+                result["p_fcf"] = round(mktcap / ttm_fcf, 2)
+        if result.get("p_fcf") is None:
+            fcf_info = info.get("freeCashflow")
+            if fcf_info and mktcap and fcf_info > 0:
+                result["p_fcf"] = round(mktcap / fcf_info, 2)
+
+        # ── QUALITY ────────────────────────────────────────────────────────
+
+        # ROE = TTM Net Income / MRQ Equity * 100
+        if ttm_ni is not None and mrq_equity and mrq_equity > 0:
+            result["roe"] = round(ttm_ni / mrq_equity * 100, 2)
+        if result.get("roe") is None:
+            result["roe"] = _safe(info.get("returnOnEquity"), multiplier=100)
+
+        # EBITDA Margin = TTM EBITDA / TTM Revenue * 100
+        if ttm_ebitda is not None and ttm_revenue and ttm_revenue > 0:
+            result["ebitda_margin"] = round(ttm_ebitda / ttm_revenue * 100, 2)
+        if result.get("ebitda_margin") is None:
+            result["ebitda_margin"] = _safe(info.get("ebitdaMargins"), multiplier=100)
+
+        # Gross Margin = TTM Gross Profit / TTM Revenue * 100
+        if ttm_gp is not None and ttm_revenue and ttm_revenue > 0:
+            result["gross_margin"] = round(ttm_gp / ttm_revenue * 100, 2)
+        elif ttm_cogs is not None and ttm_revenue and ttm_revenue > 0:
+            result["gross_margin"] = round((ttm_revenue - ttm_cogs) / ttm_revenue * 100, 2)
+        if result.get("gross_margin") is None:
+            result["gross_margin"] = _safe(info.get("grossMargins"), multiplier=100)
+
+        # D/E = MRQ Total Debt / MRQ Equity
+        if mrq_debt is not None and mrq_equity and mrq_equity > 0:
+            result["de_ratio"] = round(mrq_debt / mrq_equity, 2)
+        if result.get("de_ratio") is None:
+            de_info = _safe(info.get("debtToEquity"))
+            # Yahoo a volte restituisce D/E come percentuale (82 → 0.82×)
+            if de_info is not None and de_info > 20:
+                de_info = round(de_info / 100, 2)
+            result["de_ratio"] = de_info
+
+        # EPS CAGR 5Y: da annual income_stmt (CAGR richiede storico pluriennale)
+        # Passa inc_a già fetchato per evitare un secondo download annuale.
+        result["eps_cagr_5y"] = _eps_cagr_5y(t, info, annual_inc=inc_a)
+
+        # ── Pulizia multipli VALUE ─────────────────────────────────────────
+        # P/E, EV/EBITDA, P/Book, P/FCF negativi (azienda in perdita o equity
+        # negativo) non sono significativi come metrica value. Con
+        # lower_is_better=True, un valore negativo otterrebbe score=10 (massimo),
+        # il che è fuorviante. Si eliminano prima dello scoring.
+        for _ratio in ("pe", "ev_ebitda", "p_book", "p_fcf"):
+            if result.get(_ratio) is not None and result[_ratio] <= 0:
+                del result[_ratio]
+        # D/E negativo (equity negativo): la ratio è indefinita, non va scorata.
+        if result.get("de_ratio") is not None and result["de_ratio"] < 0:
+            del result["de_ratio"]
 
         # ── MOMENTUM ───────────────────────────────────────────────────────
-        # Momentum 12M-1M: calcolato da prezzi storici mensili
-        result["mom_12m1m"] = _momentum_12m_1m(t)
-
-        # EBITDA Margin: fallback calcolo diretto da ebitda/totalRevenue
-        if result.get("ebitda_margin") is None:
-            ebitda = info.get("ebitda")
-            rev    = info.get("totalRevenue")
-            if ebitda and rev and rev > 0:
-                result["ebitda_margin"] = round(ebitda / rev * 100, 2)
-
-        # D/E Ratio: fallback da balance sheet se debtToEquity mancante
-        if result.get("de_ratio") is None:
-            try:
-                bs = t.balance_sheet
-                if bs is not None and not bs.empty:
-                    debt_keys   = ["Total Debt", "Long Term Debt",
-                                   "Total Long Term Debt"]
-                    equity_keys = ["Stockholders Equity", "Common Stock Equity",
-                                   "Total Equity Gross Minority Interest"]
-                    debt   = next((float(bs.loc[k].iloc[0]) for k in debt_keys   if k in bs.index and pd.notna(bs.loc[k].iloc[0])), None)
-                    equity = next((float(bs.loc[k].iloc[0]) for k in equity_keys if k in bs.index and pd.notna(bs.loc[k].iloc[0])), None)
-                    if debt is not None and equity and equity > 0:
-                        result["de_ratio"] = round(debt / equity, 2)
-            except Exception:
-                pass
-        # Normalizza: Yahoo a volte restituisce D/E come percentuale (82 = 0.82x)
-        if result.get("de_ratio") and result["de_ratio"] > 20:
-            result["de_ratio"] = round(result["de_ratio"] / 100, 2)
-
-        # ── Fallback calcolati da income_stmt / balance_sheet ────────────────
-        if (result.get("pe") is None or result.get("ev_ebitda") is None
-                or result.get("p_book") is None or result.get("roe") is None
-                or result.get("gross_margin") is None):
-            try:
-                _inc = t.income_stmt
-            except Exception:
-                _inc = None
-            try:
-                _bs = t.balance_sheet
-            except Exception:
-                _bs = None
-            _inc_ok = _inc is not None and not _inc.empty
-            _bs_ok  = _bs  is not None and not _bs.empty
-            _ni_keys = (
-                "Net Income",
-                "Net Income Common Stockholders",
-                "Net Income From Continuing Operations",
-            )
-            _eq_keys = (
-                "Stockholders Equity",
-                "Common Stock Equity",
-                "Total Equity Gross Minority Interest",
-            )
-
-            # P/E: marketCap / Net Income (ttm)
-            if result.get("pe") is None and mktcap and mktcap > 0 and _inc_ok:
-                try:
-                    for _k in _ni_keys:
-                        if _k in _inc.index:
-                            _ni_row = _inc.loc[_k].dropna()
-                            if len(_ni_row) >= 1:
-                                _ni = float(_ni_row.iloc[0])
-                                if _ni > 0:
-                                    result["pe"] = round(mktcap / _ni, 2)
-                            break
-                except Exception:
-                    pass
-
-            # EV/EBITDA: enterpriseValue / EBITDA
-            if result.get("ev_ebitda") is None:
-                try:
-                    _ev  = info.get("enterpriseValue")
-                    _ebt = info.get("ebitda")
-                    if not _ev and _bs_ok and mktcap:
-                        _debt = next(
-                            (float(_bs.loc[_k].iloc[0])
-                             for _k in ("Total Debt", "Long Term Debt")
-                             if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
-                            0.0,
-                        )
-                        _cash = next(
-                            (float(_bs.loc[_k].iloc[0])
-                             for _k in ("Cash And Cash Equivalents",
-                                        "Cash Cash Equivalents And Short Term Investments")
-                             if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
-                            0.0,
-                        )
-                        _ev = mktcap + _debt - _cash
-                    if _ev and _ebt and _ebt > 0:
-                        result["ev_ebitda"] = round(_ev / _ebt, 2)
-                except Exception:
-                    pass
-
-            # P/Book: marketCap / totalEquity
-            if result.get("p_book") is None and mktcap and mktcap > 0 and _bs_ok:
-                try:
-                    _eq = next(
-                        (float(_bs.loc[_k].iloc[0])
-                         for _k in _eq_keys
-                         if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
-                        None,
-                    )
-                    if _eq and _eq > 0:
-                        result["p_book"] = round(mktcap / _eq, 2)
-                except Exception:
-                    pass
-
-            # ROE: Net Income / Equity * 100
-            if result.get("roe") is None and _inc_ok:
-                try:
-                    _ni = None
-                    for _k in _ni_keys:
-                        if _k in _inc.index:
-                            _ni_row = _inc.loc[_k].dropna()
-                            if len(_ni_row) >= 1:
-                                _ni = float(_ni_row.iloc[0])
-                            break
-                    if _ni is not None:
-                        if not _bs_ok:
-                            try:
-                                _bs = t.balance_sheet
-                                _bs_ok = _bs is not None and not _bs.empty
-                            except Exception:
-                                pass
-                        if _bs_ok:
-                            _eq = next(
-                                (float(_bs.loc[_k].iloc[0])
-                                 for _k in _eq_keys
-                                 if _k in _bs.index and pd.notna(_bs.loc[_k].iloc[0])),
-                                None,
-                            )
-                            if _eq and _eq > 0:
-                                result["roe"] = round(_ni / _eq * 100, 2)
-                except Exception:
-                    pass
-
-            # Gross Margin: (Revenue - COGS) / Revenue * 100
-            if result.get("gross_margin") is None and _inc_ok:
-                try:
-                    _rev = next(
-                        (float(_inc.loc[_k].iloc[0])
-                         for _k in ("Total Revenue", "Revenue")
-                         if _k in _inc.index and pd.notna(_inc.loc[_k].iloc[0])),
-                        None,
-                    )
-                    _cogs = next(
-                        (float(_inc.loc[_k].iloc[0])
-                         for _k in ("Cost Of Revenue", "Cost Of Goods Sold",
-                                    "Reconciled Cost Of Revenue")
-                         if _k in _inc.index and pd.notna(_inc.loc[_k].iloc[0])),
-                        None,
-                    )
-                    if _rev and _rev > 0 and _cogs is not None:
-                        result["gross_margin"] = round((_rev - _cogs) / _rev * 100, 2)
-                except Exception:
-                    pass
-
-        # EPS Revision 3M:
-        # yfinance non ha revisioni a 3M; usiamo la migliore approssimazione disponibile:
-        # earningsQuarterlyGrowth (YoY trimestrale) → earningsGrowth → forwardEPS vs trailingEPS
-        eps_rev = None
-        for key in ("earningsQuarterlyGrowth", "earningsGrowth"):
-            v = info.get(key)
-            if v is not None:
-                eps_rev = _safe(v, multiplier=100)
-                break
-        if eps_rev is None:
-            fwd = info.get("forwardEps")
-            trl = info.get("trailingEps")
-            if fwd and trl and trl != 0:
-                eps_rev = round((fwd / trl - 1) * 100, 2)
-        result["eps_rev"] = eps_rev
-
-        # Relative Strength vs benchmark
+        result["mom_12m1m"]    = _momentum_12m_1m(t)
         result["rel_strength"] = _rel_strength(t, benchmark)
 
-        # ── Metriche supplementari utili ──────────────────────────────────
-        result["operating_margin"] = _safe(info.get("operatingMargins"), multiplier=100)
-        result["profit_margin"]    = _safe(info.get("profitMargins"),    multiplier=100)
-        result["rev_growth"]       = _safe(info.get("revenueGrowth"),    multiplier=100)
-        result["roa"]              = _safe(info.get("returnOnAssets"),   multiplier=100)
-        result["current_ratio"]    = _safe(info.get("currentRatio"))
-        result["dividend_yield"]   = _safe(info.get("dividendYield"))
-        result["peg"]              = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
-        result["52w_change"]       = _safe(info.get("52WeekChange"),     multiplier=100)
-        result["prezzo"]           = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
+        # EPS Revision proxy (yfinance non espone revisioni analisti dirette).
+        # Priorità:
+        #   1. Forward EPS vs Trailing EPS: segnala quanto le stime forward
+        #      divergono dal realizzato; è il proxy più stabile.
+        #   2. earningsQuarterlyGrowth: crescita YoY trimestrale — utile come
+        #      indicatore di momentum EPS ma può essere enorme per turnaround
+        #      (es. BMPS: da perdite a utili → +300%). Usato solo come fallback.
+        # Il valore finale viene clampato a ±100% per evitare outlier nel display
+        # (lo score VQM è già limitato 0-10 dalle soglie good/bad).
+        eps_rev = None
+        fwd = info.get("forwardEps")
+        trl = info.get("trailingEps")
+        if fwd and trl and trl != 0:
+            eps_rev = round((fwd / trl - 1) * 100, 2)
+        if eps_rev is None:
+            for key in ("earningsQuarterlyGrowth", "earningsGrowth"):
+                v = info.get(key)
+                if v is not None:
+                    eps_rev = _safe(v, multiplier=100)
+                    break
+        # Clamp outlier: revisioni reali raramente escono da ±100%
+        if eps_rev is not None:
+            eps_rev = round(max(-100.0, min(100.0, eps_rev)), 2)
+        result["eps_rev"] = eps_rev
+
+        # ── Metriche supplementari ─────────────────────────────────────────
+        # Operating Margin = TTM Operating Income / TTM Revenue * 100
+        if ttm_oi is not None and ttm_revenue and ttm_revenue > 0:
+            result["operating_margin"] = round(ttm_oi / ttm_revenue * 100, 2)
+        if result.get("operating_margin") is None:
+            result["operating_margin"] = _safe(info.get("operatingMargins"), multiplier=100)
+
+        # Profit Margin = TTM Net Income / TTM Revenue * 100
+        if ttm_ni is not None and ttm_revenue and ttm_revenue > 0:
+            result["profit_margin"] = round(ttm_ni / ttm_revenue * 100, 2)
+        if result.get("profit_margin") is None:
+            result["profit_margin"] = _safe(info.get("profitMargins"), multiplier=100)
+
+        # ROA = TTM Net Income / MRQ Total Assets * 100
+        if ttm_ni is not None and mrq_assets and mrq_assets > 0:
+            result["roa"] = round(ttm_ni / mrq_assets * 100, 2)
+        if result.get("roa") is None:
+            result["roa"] = _safe(info.get("returnOnAssets"), multiplier=100)
+
+        # Revenue Growth = (TTM Revenue / Prior-year TTM Revenue − 1) * 100
+        rev_growth = None
+        if inc_q is not None and not inc_q.empty:
+            ttm_rev_now  = _ttm(_REV_KEYS, inc_q, 4)
+            ttm_rev_prev = _ttm(_REV_KEYS, inc_q.iloc[:, 4:], 4)   # 4 trimestri precedenti
+            if ttm_rev_now and ttm_rev_prev and ttm_rev_prev > 0:
+                rev_growth = round((ttm_rev_now / ttm_rev_prev - 1) * 100, 2)
+        if rev_growth is None:
+            rev_growth = _safe(info.get("revenueGrowth"), multiplier=100)
+        result["rev_growth"] = rev_growth
+
+        result["current_ratio"]  = _safe(info.get("currentRatio"))
+        result["dividend_yield"] = _safe(info.get("dividendYield"))
+        result["peg"]            = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
+        result["52w_change"]     = _safe(info.get("52WeekChange"),     multiplier=100)
+        result["prezzo"]         = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
 
     except Exception as exc:
         result["_errore"] = str(exc)
@@ -668,6 +746,9 @@ def run_screener(
       4. Salvataggio su PostgreSQL
     benchmark_override: se None ogni ticker usa il benchmark della propria nazione.
     """
+    if not tickers:
+        return [], None
+
     total   = len(tickers)
     results: dict[str, dict] = {}
 

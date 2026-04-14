@@ -3,6 +3,8 @@
 import atexit
 import decimal
 import datetime
+import json as _json
+import os
 import threading
 
 from flask import Flask, jsonify, render_template, send_from_directory
@@ -113,6 +115,28 @@ def api_ticker_detail(ticker: str):
     return jsonify(rows)
 
 
+@app.route("/api/thresholds")
+def api_thresholds():
+    """Soglie VQM per settore (per il drawer metriche). Struttura: {settore: {metrica: {good, bad, lower_is_better}}}."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "thresholds.json")
+    with open(path, encoding="utf-8") as f:
+        raw = _json.load(f)
+    reserved = {"pesi", "tickers"}
+    out: dict = {}
+    for sector, pillars in raw.items():
+        if sector in reserved:
+            continue
+        out[sector] = {}
+        for entries in pillars.values():
+            for e in entries:
+                out[sector][e["metrica"]] = {
+                    "good": e["good"],
+                    "bad":  e["bad"],
+                    "lower_is_better": e["lower_is_better"],
+                }
+    return jsonify(out)
+
+
 @app.route("/api/runs")
 def api_runs():
     """Lista delle ultime 30 esecuzioni."""
@@ -151,15 +175,15 @@ def api_latest():
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
-def _scheduled_run() -> None:
-    """Eseguito dallo scheduler: skip se un run di oggi è già presente."""
+def _scheduled_run(force: bool = False) -> None:
+    """Eseguito dallo scheduler: skip se un run di oggi è già presente (a meno che force=True)."""
     import db as db_module
     from screener import run_screener, DEFAULT_TICKERS
 
-    if db_module.load_today_run() is not None:
+    if not force and db_module.load_today_run() is not None:
         app.logger.info("Scheduler: run di oggi già presente, skip.")
         return
-    app.logger.info("Scheduler: avvio run automatico...")
+    app.logger.info("Scheduler: avvio run automatico (force=%s)...", force)
     try:
         run_screener(DEFAULT_TICKERS)
         app.logger.info("Scheduler: run completato.")
@@ -172,8 +196,11 @@ _scheduler.add_job(_scheduled_run, CronTrigger(hour=0, minute=0))  # mezzanotte 
 _scheduler.start()
 atexit.register(lambda: _scheduler.shutdown(wait=False))
 
-# Avvia anche subito in background al primo lancio del server
-threading.Thread(target=_scheduled_run, daemon=True, name="screener-startup").start()
+# All'avvio del server esegue sempre un run forzato (ignora run già salvati oggi)
+threading.Thread(
+    target=_scheduled_run, kwargs={"force": True},
+    daemon=True, name="screener-startup",
+).start()
 
 
 if __name__ == "__main__":

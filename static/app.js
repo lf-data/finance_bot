@@ -6,6 +6,7 @@ let activeFilter = 'ALL';
 let sortBy       = 'score';
 let historyChart = null;
 let portfolio    = new Set(JSON.parse(localStorage.getItem('vqm_portfolio') || '[]'));
+let thresholds   = {};   // {settore: {metrica: {good, bad, lower_is_better}}}
 
 // Colour helpers (shared)
 const CLS_COLOR  = { BUY:'#00d084', HOLD:'#fbbf24', SELL:'#f87171' };
@@ -19,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initSearch();
   loadLatest();
   loadLastRunLabel();
+  loadThresholds();
   updatePortfolioBadge();
 });
 
@@ -56,6 +58,13 @@ async function loadLastRunLabel() {
 async function loadTickerHistory(ticker) {
   const res = await fetch(`/api/ticker/${encodeURIComponent(ticker)}`);
   return await res.json();
+}
+
+async function loadThresholds() {
+  try {
+    const res = await fetch('/api/thresholds');
+    if (res.ok) thresholds = await res.json();
+  } catch { /* silent */ }
 }
 
 function updateNavStats() {
@@ -242,10 +251,10 @@ function buildDrawerBody(r) {
       <span class="text-[11px] font-semibold text-gray-600 normal-case tracking-normal ml-1">${fmt1(r.score_value)} / 10</span>
     </div>
     <div class="grid grid-cols-2 gap-2">
-      ${mVal('EV/EBITDA', r.ev_ebitda, 'x')}
-      ${mVal('P/FCF',     r.p_fcf,     'x')}
-      ${mVal('P/E',       r.pe,        'x')}
-      ${mVal('P/Book',    r.p_book,    'x')}
+      ${mValThr('EV/EBITDA', r.ev_ebitda, 'x',  'ev_ebitda', r.settore)}
+      ${mValThr('P/FCF',     r.p_fcf,     'x',  'p_fcf',     r.settore)}
+      ${mValThr('P/E',       r.pe,        'x',  'pe',        r.settore)}
+      ${mValThr('P/Book',    r.p_book,    'x',  'p_book',    r.settore)}
     </div>
   </div>
 
@@ -256,11 +265,11 @@ function buildDrawerBody(r) {
       <span class="text-[11px] font-semibold text-gray-600 normal-case tracking-normal ml-1">${fmt1(r.score_quality)} / 10</span>
     </div>
     <div class="grid grid-cols-2 gap-2">
-      ${mVal('ROE',          r.roe,          '%')}
-      ${mVal('EBITDA Margin',r.ebitda_margin,'%')}
-      ${mVal('Gross Margin', r.gross_margin, '%')}
-      ${mVal('D/E Ratio',    r.de_ratio,     'x')}
-      ${mVal('EPS CAGR 5Y',  r.eps_cagr_5y,  '%')}
+      ${mValThr('ROE',           r.roe,          '%', 'roe',          r.settore)}
+      ${mValThr('EBITDA Margin', r.ebitda_margin,'%', 'ebitda_margin',r.settore)}
+      ${mValThr('Gross Margin',  r.gross_margin, '%', 'gross_margin', r.settore)}
+      ${mValThr('D/E Ratio',     r.de_ratio,     'x', 'de_ratio',     r.settore)}
+      ${mValThr('EPS CAGR 5Y',   r.eps_cagr_5y,  '%', 'eps_cagr_5y',  r.settore)}
     </div>
   </div>
 
@@ -271,9 +280,9 @@ function buildDrawerBody(r) {
       <span class="text-[11px] font-semibold text-gray-600 normal-case tracking-normal ml-1">${fmt1(r.score_momentum)} / 10</span>
     </div>
     <div class="grid grid-cols-2 gap-2">
-      ${mVal('Mom 12M-1M',    r.mom_12m1m,   '%')}
-      ${mVal('EPS Revision',  r.eps_rev,     '%')}
-      ${mVal('Rel. Strength', r.rel_strength,'%')}
+      ${mValThr('Mom 12M-1M',    r.mom_12m1m,    '%', 'mom_12m1m',    r.settore)}
+      ${mValThr('EPS Revision',  r.eps_rev,      '%', 'eps_rev',      r.settore)}
+      ${mValThr('Rel. Strength', r.rel_strength, '%', 'rel_strength', r.settore)}
     </div>
   </div>
 
@@ -623,6 +632,61 @@ function mVal(label, value, unit) {
   <div class="m-tile">
     <div class="lbl">${label}</div>
     <div class="val${isN ? ' dim' : ''}">${txt}</div>
+  </div>`;
+}
+
+// Restituisce la soglia per la metrica del settore dato (fallback su _default)
+function getMetricThr(sector, metricKey) {
+  return (thresholds[sector]  && thresholds[sector][metricKey])
+      || (thresholds['_default'] && thresholds['_default'][metricKey])
+      || null;
+}
+
+// Colore del valore rispetto alle soglie: verde/giallo/rosso
+function metricColor(value, thr) {
+  if (value == null || !thr || thr.good == null || thr.bad == null) return null;
+  const { good, bad, lower_is_better } = thr;
+  if (lower_is_better) {
+    if (value <= good) return '#00d084';
+    if (value >= bad)  return '#f87171';
+    return '#fbbf24';
+  } else {
+    if (value >= good) return '#00d084';
+    if (value <= bad)  return '#f87171';
+    return '#fbbf24';
+  }
+}
+
+// Tile metrica con soglie (usato nel drawer per Value/Quality/Momentum)
+function mValThr(label, value, unit, metricKey, sector) {
+  const isN  = value == null;
+  const vTxt = isN ? '—' : fmtNum(value, 2) + '\u00a0' + unit;
+  const thr  = getMetricThr(sector, metricKey);
+  const col  = isN ? null : metricColor(value, thr);
+
+  let thrLine = '';
+  if (thr && thr.good != null && thr.bad != null) {
+    const fv  = v => Number(v).toLocaleString('it-IT', { maximumFractionDigits: 2 });
+    const sym = unit === '%' ? '%' : '\u00a0' + unit;
+    if (thr.lower_is_better) {
+      thrLine = `<span style="color:#00d084">&#x2713;&#xA0;&#x2264;${fv(thr.good)}${sym}</span>`
+              + `<span class="mx-1" style="color:#3f3f52">·</span>`
+              + `<span style="color:#f87171">&#x2715;&#xA0;&#x2265;${fv(thr.bad)}${sym}</span>`;
+    } else {
+      thrLine = `<span style="color:#00d084">&#x2713;&#xA0;&#x2265;${fv(thr.good)}${sym}</span>`
+              + `<span class="mx-1" style="color:#3f3f52">·</span>`
+              + `<span style="color:#f87171">&#x2715;&#xA0;&#x2264;${fv(thr.bad)}${sym}</span>`;
+    }
+  } else if (thr && (thr.good == null || thr.bad == null)) {
+    thrLine = `<span style="color:#3f3f52">N/A settore</span>`;
+  }
+
+  const borderLeft = col ? `border-left:2px solid ${col};padding-left:.65rem;` : '';
+  return `
+  <div class="m-tile" style="${borderLeft}">
+    <div class="lbl">${label}</div>
+    <div class="val${isN ? ' dim' : ''}" style="${col ? 'color:'+col : ''}">${vTxt}</div>
+    ${thrLine ? `<div class="thr">${thrLine}</div>` : ''}
   </div>`;
 }
 
