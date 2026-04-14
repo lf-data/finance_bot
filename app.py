@@ -5,7 +5,7 @@ import decimal
 import datetime
 import threading
 
-from flask import Flask, jsonify, render_template
+from flask import Flask, jsonify, render_template, send_from_directory
 import psycopg2
 import psycopg2.extras
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -58,6 +58,13 @@ def _query(sql: str, params=None) -> list[dict]:
 @app.route("/")
 def index():
     return render_template("index.html")
+
+
+@app.route("/sw.js")
+def service_worker():
+    """Serve il service worker dalla root per avere scope completo."""
+    return send_from_directory("static", "sw.js",
+                               mimetype="application/javascript")
 
 
 @app.route("/api/tickers")
