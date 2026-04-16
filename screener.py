@@ -258,7 +258,11 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 
         # ── Info base (sempre da info — non presenti negli statements) ─────
         result["nome"]      = info.get("shortName") or info.get("longName") or ticker
-        result["settore"]   = info.get("sector")    or info.get("quoteType") or "N/D"
+        _sector = info.get("sector")
+        # quoteType ("EQUITY", "ETF", "INDEX", …) non è un settore economico:
+        # usalo solo se sector è assente *e* quoteType non è "EQUITY" (default per tutte le azioni).
+        _qtype  = info.get("quoteType", "")
+        result["settore"] = _sector or (_qtype if _qtype and _qtype.upper() != "EQUITY" else "N/D")
         result["industria"] = info.get("industry")  or "N/D"
         result["mktcap"]    = info.get("marketCap")
         result["valuta"]    = info.get("currency")  or "EUR"
