@@ -244,8 +244,17 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
     """
     result: dict = {"ticker": ticker}
     try:
-        t    = yf.Ticker(ticker, session=_get_yf_session())
-        info = t.info or {}
+        t = yf.Ticker(ticker, session=_get_yf_session())
+
+        # ── t.info: wrapped separately — yfinance 1.2.x can raise
+        # TypeError("argument of type 'NoneType' is not iterable") for tickers
+        # that return incomplete JSON from Yahoo (null sub-objects). If info
+        # fails we still attempt statement-based metrics. ──────────────────
+        try:
+            _raw_info = t.info
+            info = _raw_info if isinstance(_raw_info, dict) else {}
+        except Exception:
+            info = {}
 
         # ── Info base (sempre da info — non presenti negli statements) ─────
         result["nome"]      = info.get("shortName") or info.get("longName") or ticker
