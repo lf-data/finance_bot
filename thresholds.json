@@ -1,266 +1,1079 @@
 {
   "pesi": {
-    "value":    0.30,
-    "quality":  0.50,
-    "momentum": 0.20
+    "value": 0.25,
+    "quality": 0.5,
+    "momentum": 0.25
   },
   "tickers": [
-    "A2A.MI", "AMP.MI", "AVIO.MI", "AZM.MI", "BMED.MI",
-    "BMPS.MI", "BAMI.MI", "BPE.MI", "BC.MI", "BZU.MI",
-    "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "RACE.MI",
-    "FCT.MI", "FBK.MI", "G.MI", "HER.MI", "ISP.MI",
-    "INW.MI", "IG.MI", "IVG.MI", "LDO.MI", "LTMC.MI",
-    "MB.MI", "MONC.MI", "NEXI.MI", "PST.MI", "PRY.MI",
-    "REC.MI", "SPM.MI", "SRG.MI", "STLAM.MI", "STMMI.MI",
-    "TIT.MI", "TEN.MI", "TRN.MI", "UCG.MI", "UNI.MI",
-"AAPL","MSFT","GOOG","AMZN","META","TSLA","NVDA","NFLX",
-  "ORCL","INTC","AMD","CRM","ADBE","CSCO","QCOM","AVGO",
-  "PYPL","SNOW","PLTR","UBER","ABNB","DIS","NKE",
-  "KO","PEP","MCD","WMT","COST","HD","V","MA",
-  "JPM","BAC","GS","MS","BRK-B","XOM","CVX","LLY", "SAP.DE",
-  "SIE.DE","BAS.DE","BAYN.DE","BMW.DE","DTE.DE","VOW3.DE","IFX.DE","ALV.DE","DBK.DE",
-  "MC.PA","OR.PA","SAN.PA","SU.PA","AIR.PA","ENGI.PA",
-  "ASML","INGA.AS","PHIA.AS",
-  "SAN","BBVA","ITX.MC","IBE.MC","REP.MC","TEF.MC",
-  "NESN.SW","ROG.SW","NOVN.SW","UBSG.SW","CFR.SW","SREN.SW"],
+    "A2A.MI",
+    "AMP.MI",
+    "AVIO.MI",
+    "AZM.MI",
+    "BMED.MI",
+    "BMPS.MI",
+    "BAMI.MI",
+    "BPE.MI",
+    "BC.MI",
+    "BZU.MI",
+    "CPR.MI",
+    "DIA.MI",
+    "ENEL.MI",
+    "ENI.MI",
+    "RACE.MI",
+    "FCT.MI",
+    "FBK.MI",
+    "G.MI",
+    "HER.MI",
+    "ISP.MI",
+    "INW.MI",
+    "IG.MI",
+    "IVG.MI",
+    "LDO.MI",
+    "LTMC.MI",
+    "MB.MI",
+    "MONC.MI",
+    "NEXI.MI",
+    "PST.MI",
+    "PRY.MI",
+    "REC.MI",
+    "SPM.MI",
+    "SRG.MI",
+    "STLAM.MI",
+    "STMMI.MI",
+    "TIT.MI",
+    "TEN.MI",
+    "TRN.MI",
+    "UCG.MI",
+    "UNI.MI",
+    "AAPL",
+    "MSFT",
+    "GOOG",
+    "AMZN",
+    "META",
+    "TSLA",
+    "NVDA",
+    "NFLX",
+    "ORCL",
+    "INTC",
+    "AMD",
+    "CRM",
+    "ADBE",
+    "CSCO",
+    "QCOM",
+    "AVGO",
+    "PYPL",
+    "SNOW",
+    "PLTR",
+    "UBER",
+    "ABNB",
+    "DIS",
+    "NKE",
+    "KO",
+    "PEP",
+    "MCD",
+    "WMT",
+    "COST",
+    "HD",
+    "V",
+    "MA",
+    "JPM",
+    "BAC",
+    "GS",
+    "MS",
+    "BRK-B",
+    "XOM",
+    "CVX",
+    "LLY",
+    "SAP.DE",
+    "SIE.DE",
+    "BAS.DE",
+    "BAYN.DE",
+    "BMW.DE",
+    "DTE.DE",
+    "VOW3.DE",
+    "IFX.DE",
+    "ALV.DE",
+    "DBK.DE",
+    "MC.PA",
+    "OR.PA",
+    "SAN.PA",
+    "SU.PA",
+    "AIR.PA",
+    "ENGI.PA",
+    "ASML",
+    "INGA.AS",
+    "PHIA.AS",
+    "SAN",
+    "BBVA",
+    "ITX.MC",
+    "IBE.MC",
+    "REP.MC",
+    "TEF.MC",
+    "NESN.SW",
+    "ROG.SW",
+    "NOVN.SW",
+    "UBSG.SW",
+    "CFR.SW",
+    "SREN.SW"
+  ],
   "Financial Services": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": null, "bad": null, "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": null, "bad": null, "lower_is_better": true},
-      {"metrica": "pe",           "good": 10,   "bad": 20,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 0.8,  "bad": 2.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": null,
+        "bad": null,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": null,
+        "bad": null,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 9,
+        "bad": 18,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_book",
+        "good": 0.9,
+        "bad": 1.8,
+        "lower_is_better": true
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 12,   "bad": 5,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": null, "bad": null, "lower_is_better": false},
-      {"metrica": "gross_margin", "good": null, "bad": null, "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": null, "bad": null, "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 8,    "bad": 0,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 13,
+        "bad": 4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": null,
+        "bad": null,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": null,
+        "bad": null,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": null,
+        "bad": null,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 8,
+        "bad": -2,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 15,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 15,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": null,
+        "bad": null,
+        "lower_is_better": false
+      }
     ]
   },
   "Real Estate": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 15,   "bad": 25,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 15,   "bad": 25,   "lower_is_better": true},
-      {"metrica": "pe",           "good": null, "bad": null, "lower_is_better": true},
-      {"metrica": "p_book",       "good": 0.8,  "bad": 1.5,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 14,
+        "bad": 22,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 16,
+        "bad": 28,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": null,
+        "bad": null,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 5,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 8,    "bad": 2,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 50,   "bad": 25,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": null, "bad": null, "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 1.2,  "bad": 3.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 5,    "bad": 0,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 10,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 55,
+        "bad": 30,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 7,
+        "bad": 2,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 1.0,
+        "bad": 2.5,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 5,
+        "bad": -2,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 12,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 2,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 12,
+        "bad": -8,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 2,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 8,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ]
   },
   "Utilities": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 8,    "bad": 15,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 12,   "bad": 22,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 12,   "bad": 20,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 1.2,  "bad": 2.5,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 7,
+        "bad": 13,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 12,
+        "bad": 20,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 13,
+        "bad": 22,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 5,
+        "bad": 1.5,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 10,   "bad": 4,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 30,   "bad": 15,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": null, "bad": null, "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 2.5,  "bad": 5.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 5,    "bad": 1,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 10,
+        "bad": 4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 35,
+        "bad": 20,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 8,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 2.0,
+        "bad": 4.5,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 6,
+        "bad": 0,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 10,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 2,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 5,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 10,
+        "bad": -8,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 2,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 6,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ]
   },
   "Energy": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 5,    "bad": 12,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 8,    "bad": 18,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 10,   "bad": 18,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 1.2,  "bad": 3.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 5,
+        "bad": 11,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 7,
+        "bad": 16,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 9,
+        "bad": 16,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 9,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 12,   "bad": 3,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 25,   "bad": 10,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 35,   "bad": 15,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.7,  "bad": 2.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 5,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 14,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 30,
+        "bad": 12,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 12,
+        "bad": 4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.5,
+        "bad": 1.5,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 7,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 15,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 18,
+        "bad": -4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 15,
+        "bad": -20,
+        "lower_is_better": false
+      }
     ]
   },
   "Technology": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 15,   "bad": 30,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 20,   "bad": 40,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 22,   "bad": 45,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": null, "bad": null, "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 18,
+        "bad": 35,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 22,
+        "bad": 45,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 20,
+        "bad": 40,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 3,
+        "bad": 0.5,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 25,   "bad": 8,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 30,   "bad": 12,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 65,   "bad": 40,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.3,  "bad": 1.2,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 15,   "bad": 5,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 25,
+        "bad": 10,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 35,
+        "bad": 12,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 25,
+        "bad": 10,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.2,
+        "bad": 1.0,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 18,
+        "bad": 5,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 20,   "bad": 2,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 10,   "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 22,
+        "bad": 0,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 20,
+        "bad": -5,
+        "lower_is_better": false
+      }
     ]
   },
   "Healthcare": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 12,   "bad": 22,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 18,   "bad": 35,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 18,   "bad": 35,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 4,    "bad": 10,   "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 13,
+        "bad": 24,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 18,
+        "bad": 38,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 18,
+        "bad": 35,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 4,
+        "bad": 0.5,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 18,   "bad": 6,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 25,   "bad": 10,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 60,   "bad": 35,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.5,  "bad": 1.5,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 10,   "bad": 2,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 20,
+        "bad": 6,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 30,
+        "bad": 10,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 15,
+        "bad": 5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.6,
+        "bad": 2.0,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 10,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 18,   "bad": 2,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 15,
+        "bad": -2,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 15,
+        "bad": -5,
+        "lower_is_better": false
+      }
     ]
   },
   "Consumer Cyclical": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 10,   "bad": 18,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 14,   "bad": 25,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 18,   "bad": 30,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 2.5,  "bad": 6.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 10,
+        "bad": 18,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 14,
+        "bad": 25,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 16,
+        "bad": 28,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 5,
+        "bad": 1,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 18,   "bad": 6,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 18,   "bad": 8,    "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 45,   "bad": 25,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.8,  "bad": 2.5,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 10,   "bad": 2,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 20,
+        "bad": 6,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 18,
+        "bad": 7,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 14,
+        "bad": 5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.8,
+        "bad": 2.0,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 12,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 18,   "bad": 2,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 18,
+        "bad": -2,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 15,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ]
   },
   "Consumer Defensive": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 12,   "bad": 20,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 16,   "bad": 28,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 18,   "bad": 28,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 3.0,  "bad": 8.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 14,
+        "bad": 22,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 18,
+        "bad": 30,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 20,
+        "bad": 30,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 4,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 20,   "bad": 8,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 20,   "bad": 10,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 45,   "bad": 28,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 1.0,  "bad": 3.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 6,    "bad": 1,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 25,
+        "bad": 8,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 22,
+        "bad": 10,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 15,
+        "bad": 6,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 1.0,
+        "bad": 2.5,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 7,
+        "bad": 1,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 12,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 2,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 5,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 12,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 2,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 8,
+        "bad": -5,
+        "lower_is_better": false
+      }
     ]
   },
   "Industrials": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 9,    "bad": 16,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 14,   "bad": 24,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 16,   "bad": 26,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 2.0,  "bad": 5.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 10,
+        "bad": 17,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 16,
+        "bad": 26,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 16,
+        "bad": 26,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 5,
+        "bad": 1.5,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 15,   "bad": 5,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 15,   "bad": 7,    "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 35,   "bad": 18,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.8,  "bad": 2.5,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 8,    "bad": 1,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 16,
+        "bad": 5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 16,
+        "bad": 8,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 14,
+        "bad": 5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.7,
+        "bad": 2.0,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 10,
+        "bad": 1,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 15,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 15,
+        "bad": -2,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 12,
+        "bad": -5,
+        "lower_is_better": false
+      }
     ]
   },
   "Communication Services": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 8,    "bad": 15,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 14,   "bad": 24,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 16,   "bad": 28,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 2.0,  "bad": 6.0,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 7,
+        "bad": 13,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 12,
+        "bad": 22,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 14,
+        "bad": 24,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 5,
+        "bad": 1.5,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 18,   "bad": 6,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 25,   "bad": 12,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 55,   "bad": 35,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 1.5,  "bad": 4.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 6,    "bad": 0,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 14,
+        "bad": 4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 30,
+        "bad": 12,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 10,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 1.5,
+        "bad": 3.5,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 6,
+        "bad": -2,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 15,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 12,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 8,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ]
   },
   "Basic Materials": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 6,    "bad": 12,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 10,   "bad": 20,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 12,   "bad": 20,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 1.5,  "bad": 3.5,  "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 6,
+        "bad": 12,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 9,
+        "bad": 18,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 10,
+        "bad": 18,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 7,
+        "bad": 2,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 12,   "bad": 3,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 22,   "bad": 10,   "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 35,   "bad": 15,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.7,  "bad": 2.0,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 5,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 12,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 22,
+        "bad": 10,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 10,
+        "bad": 3,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.6,
+        "bad": 1.8,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 7,
+        "bad": -8,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 15,   "bad": 0,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 15,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 12,
+        "bad": -15,
+        "lower_is_better": false
+      }
     ]
   },
   "_default": {
     "value": [
-      {"metrica": "ev_ebitda",    "good": 10,   "bad": 18,   "lower_is_better": true},
-      {"metrica": "p_fcf",        "good": 14,   "bad": 25,   "lower_is_better": true},
-      {"metrica": "pe",           "good": 15,   "bad": 25,   "lower_is_better": true},
-      {"metrica": "p_book",       "good": 2,    "bad": 7,    "lower_is_better": true}
+      {
+        "metrica": "ev_ebitda",
+        "good": 11,
+        "bad": 18,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "p_fcf",
+        "good": 16,
+        "bad": 27,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "pe",
+        "good": 15,
+        "bad": 25,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "fcf_yield",
+        "good": 4,
+        "bad": 1,
+        "lower_is_better": false
+      }
     ],
     "quality": [
-      {"metrica": "roe",          "good": 18,   "bad": 6,    "lower_is_better": false},
-      {"metrica": "ebitda_margin","good": 18,   "bad": 8,    "lower_is_better": false},
-      {"metrica": "gross_margin", "good": 40,   "bad": 20,   "lower_is_better": false},
-      {"metrica": "de_ratio",     "good": 0.8,  "bad": 2.5,  "lower_is_better": true},
-      {"metrica": "eps_cagr_5y",  "good": 8,    "bad": 0,    "lower_is_better": false}
+      {
+        "metrica": "roe",
+        "good": 15,
+        "bad": 5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "ebitda_margin",
+        "good": 18,
+        "bad": 8,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "roic",
+        "good": 12,
+        "bad": 4,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "de_ratio",
+        "good": 0.7,
+        "bad": 2.0,
+        "lower_is_better": true
+      },
+      {
+        "metrica": "eps_cagr_4y",
+        "good": 8,
+        "bad": 0,
+        "lower_is_better": false
+      }
     ],
     "momentum": [
-      {"metrica": "mom_12m1m",    "good": 18,   "bad": 2,    "lower_is_better": false},
-      {"metrica": "eps_rev",      "good": 3,    "bad": -5,   "lower_is_better": false},
-      {"metrica": "rel_strength", "good": 8,    "bad": -5,   "lower_is_better": false}
+      {
+        "metrica": "mom_12m1m",
+        "good": 15,
+        "bad": -2,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "eps_rev",
+        "good": 3,
+        "bad": -5,
+        "lower_is_better": false
+      },
+      {
+        "metrica": "fcf_growth",
+        "good": 10,
+        "bad": -5,
+        "lower_is_better": false
+      }
     ]
   }
 }

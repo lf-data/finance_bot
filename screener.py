@@ -68,8 +68,13 @@ _RESERVED_KEYS   = {"pesi", "tickers"}
 
 def _load_vqm_config() -> tuple[dict, dict, list]:
     """Carica thresholds.json → (soglie, pesi, tickers)."""
-    with open(_THRESHOLDS_PATH, encoding="utf-8") as f:
-        raw = json.load(f)
+    try:
+        with open(_THRESHOLDS_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"thresholds.json non trovato in {_THRESHOLDS_PATH}")
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"thresholds.json malformato — {exc}") from exc
     pesi    = raw.get("pesi", {"value": 0.30, "quality": 0.40, "momentum": 0.30})
     tickers = raw.get("tickers") or []
     soglie  = {
@@ -101,10 +106,10 @@ def _momentum_12m_1m(ticker_obj: yf.Ticker) -> float | None:
     """Rendimento 12M escludendo l'ultimo mese (cross-sectional momentum standard)."""
     try:
         hist = ticker_obj.history(period="13mo", interval="1mo", auto_adjust=True)
-        if hist is None or len(hist) < 13:
+        if hist is None or hist.empty or len(hist) < 13:
             # fallback: usa 12M completo
             hist = ticker_obj.history(period="12mo", interval="1mo", auto_adjust=True)
-            if hist is None or len(hist) < 2:
+            if hist is None or hist.empty or len(hist) < 2:
                 return None
             ret = (hist["Close"].iloc[-1] / hist["Close"].iloc[0] - 1) * 100
             return round(ret, 2)
@@ -171,7 +176,7 @@ def _eps_cagr_5y(ticker_obj: yf.Ticker, info: dict,
     except Exception:
         pass
 
-    # Livello 3: proxy da info
+    # Livello 2: proxy da info
     for key in ("earningsGrowth", "earningsQuarterlyGrowth", "revenueGrowth"):
         v = info.get(key)
         if v is not None:
@@ -201,6 +206,8 @@ _DEBT_KEYS   = ("Total Debt", "Long Term Debt", "Total Long Term Debt")
 _CASH_KEYS   = ("Cash And Cash Equivalents",
                 "Cash Cash Equivalents And Short Term Investments")
 _ASSETS_KEYS = ("Total Assets",)
+_TAX_PROV_KEYS = ("Tax Provision", "Income Tax Expense")
+_PRETAX_KEYS   = ("Pretax Income", "Income Before Tax")
 
 
 def _ttm(keys: tuple, stmt, n: int = 4) -> float | None:
@@ -229,6 +236,18 @@ def _mrq(keys: tuple, stmt) -> float | None:
             row = stmt.loc[key].dropna()
             if len(row) >= 1 and pd.notna(row.iloc[0]):
                 return float(row.iloc[0])
+    return None
+
+
+def _mrq_nth(keys: tuple, stmt, n: int) -> float | None:
+    """n-th most recent value from a statement (0 = MRQ, 4 = 4 periods ago)."""
+    if stmt is None or stmt.empty:
+        return None
+    for key in keys:
+        if key in stmt.index:
+            row = stmt.loc[key].dropna()
+            if len(row) > n:
+                return float(row.iloc[n])
     return None
 
 
@@ -310,6 +329,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         cf  = cf_q  if cf_q  is not None else cf_a
         n_periods = 4 if inc is inc_q and inc_q is not None else 1
         n_cf      = 4 if cf  is cf_q  and cf_q  is not None else 1
+        n_bs      = 4 if bs  is bs_q  and bs_q  is not None else 1
 
         # ── TTM — somma ultimi 4 trimestri (o 1 anno) ─────────────────────
         ttm_revenue = _ttm(_REV_KEYS,    inc, n_periods)
@@ -326,6 +346,16 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         # EBITDA: valore diretto o EBIT + D&A
         if ttm_ebitda is None and ttm_oi is not None and ttm_da is not None:
             ttm_ebitda = ttm_oi + abs(ttm_da)
+
+        # Effective tax rate da TTM (Tax Provision / Pretax Income).
+        # Clamped 10-40% per neutralizzare periodi con imposte distorte
+        # (es. benefici fiscali una-tantum o DTA). Fallback 24% se non disponibile.
+        _ttm_tax    = _ttm(_TAX_PROV_KEYS, inc, n_periods)
+        _ttm_pretax = _ttm(_PRETAX_KEYS,   inc, n_periods)
+        if _ttm_tax is not None and _ttm_pretax and _ttm_pretax > 0:
+            effective_tax_rate = max(0.10, min(0.40, _ttm_tax / _ttm_pretax))
+        else:
+            effective_tax_rate = 0.24  # proxy IRES/corporate tax fallback
 
         # ── MRQ — balance sheet più recente ───────────────────────────────
         mrq_equity = _mrq(_EQ_KEYS,    bs)
@@ -369,23 +399,37 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         if result.get("p_book") is None:
             result["p_book"] = _safe(info.get("priceToBook"))
 
-        # P/FCF = mktcap / TTM FCF  (FCF = OCF − |CapEx|)
+        # FCF (TTM) = OCF − |CapEx|
+        ttm_fcf: float | None = None
         if ttm_ocf is not None and ttm_capex is not None:
             ttm_fcf = (ttm_ocf + ttm_capex          # CapEx negativo in yfinance
                        if ttm_capex < 0
                        else ttm_ocf - ttm_capex)
-            if mktcap and ttm_fcf > 0:
-                result["p_fcf"] = round(mktcap / ttm_fcf, 2)
+        # P/FCF = mktcap / TTM FCF
+        if ttm_fcf is not None and ttm_fcf > 0 and mktcap:
+            result["p_fcf"] = round(mktcap / ttm_fcf, 2)
         if result.get("p_fcf") is None:
             fcf_info = info.get("freeCashflow")
             if fcf_info and mktcap and fcf_info > 0:
                 result["p_fcf"] = round(mktcap / fcf_info, 2)
+            if fcf_info and ttm_fcf is None and (fcf_info or 0) > 0:
+                ttm_fcf = float(fcf_info)
+        # FCF Yield = TTM FCF / Market Cap × 100
+        if ttm_fcf is not None and ttm_fcf > 0 and mktcap and mktcap > 0:
+            result["fcf_yield"] = round(ttm_fcf / mktcap * 100, 2)
 
         # ── QUALITY ────────────────────────────────────────────────────────
 
-        # ROE = TTM Net Income / MRQ Equity * 100
-        if ttm_ni is not None and mrq_equity and mrq_equity > 0:
-            result["roe"] = round(ttm_ni / mrq_equity * 100, 2)
+        # ROE = TTM Net Income / Average Equity × 100
+        # Equity medio = (equity fine TTM + equity inizio TTM) / 2
+        mrq_equity_prev = _mrq_nth(_EQ_KEYS, bs, n_bs)
+        avg_equity = (
+            (mrq_equity + mrq_equity_prev) / 2
+            if mrq_equity is not None and mrq_equity_prev is not None
+            else mrq_equity
+        )
+        if ttm_ni is not None and avg_equity and avg_equity > 0:
+            result["roe"] = round(ttm_ni / avg_equity * 100, 2)
         if result.get("roe") is None:
             result["roe"] = _safe(info.get("returnOnEquity"), multiplier=100)
 
@@ -413,9 +457,18 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
                 de_info = round(de_info / 100, 2)
             result["de_ratio"] = de_info
 
-        # EPS CAGR 5Y: da annual income_stmt (CAGR richiede storico pluriennale)
+        # EPS CAGR: da annual income_stmt (yfinance restituisce max 4 anni → CAGR su 3-4 periodi)
         # Passa inc_a già fetchato per evitare un secondo download annuale.
-        result["eps_cagr_5y"] = _eps_cagr_5y(t, info, annual_inc=inc_a)
+        result["eps_cagr_4y"] = _eps_cagr_5y(t, info, annual_inc=inc_a)
+
+        # ROIC = NOPAT / Invested Capital × 100
+        # NOPAT = TTM Operating Income × (1 − effective tax rate)
+        # Invested Capital = Equity + Debt − Cash
+        if ttm_oi is not None and mrq_equity is not None:
+            _nopat = ttm_oi * (1 - effective_tax_rate)
+            _invested_capital = (mrq_equity or 0) + (mrq_debt or 0) - (mrq_cash or 0)
+            if _invested_capital > 0:
+                result["roic"] = round(_nopat / _invested_capital * 100, 2)
 
         # ── Pulizia multipli VALUE ─────────────────────────────────────────
         # P/E, EV/EBITDA, P/Book, P/FCF negativi (azienda in perdita o equity
@@ -430,8 +483,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
             del result["de_ratio"]
 
         # ── MOMENTUM ───────────────────────────────────────────────────────
-        result["mom_12m1m"]    = _momentum_12m_1m(t)
-        result["rel_strength"] = _rel_strength(t, benchmark)
+        result["mom_12m1m"] = _momentum_12m_1m(t)
 
         # EPS Revision proxy (yfinance non espone revisioni analisti dirette).
         # Priorità:
@@ -483,18 +535,29 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         rev_growth = None
         if inc_q is not None and not inc_q.empty and inc_q.shape[1] >= 8:
             ttm_rev_now  = _ttm(_REV_KEYS, inc_q, 4)
-            ttm_rev_prev = _ttm(_REV_KEYS, inc_q.iloc[:, 4:], 4)   # 4 trimestri precedenti
+            ttm_rev_prev = _ttm(_REV_KEYS, inc_q.iloc[:, 4:8], 4)  # 4 trimestri precedenti
             if ttm_rev_now and ttm_rev_prev and ttm_rev_prev > 0:
                 rev_growth = round((ttm_rev_now / ttm_rev_prev - 1) * 100, 2)
         if rev_growth is None:
             rev_growth = _safe(info.get("revenueGrowth"), multiplier=100)
         result["rev_growth"] = rev_growth
 
+        # FCF Growth YoY = (TTM FCF / Prior-year TTM FCF − 1) × 100
+        if cf_q is not None and cf_q.shape[1] >= 8 and ttm_fcf is not None and ttm_fcf > 0:
+            _ocf_prev = _ttm(_OCF_KEYS,   cf_q.iloc[:, 4:8], 4)
+            _cx_prev  = _ttm(_CAPEX_KEYS, cf_q.iloc[:, 4:8], 4)
+            if _ocf_prev is not None and _cx_prev is not None:
+                _fcf_prev = (_ocf_prev + _cx_prev if _cx_prev < 0 else _ocf_prev - _cx_prev)
+                if _fcf_prev > 0:
+                    result["fcf_growth"] = round((ttm_fcf / _fcf_prev - 1) * 100, 2)
+
         result["current_ratio"]  = _safe(info.get("currentRatio"))
         result["dividend_yield"] = _safe(info.get("dividendYield"))
         result["peg"]            = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
         result["52w_change"]     = _safe(info.get("52WeekChange"),     multiplier=100)
         result["prezzo"]         = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
+        # Rel. strength vs benchmark (extra — non scorata nel VQM, tenuta per analisi storica)
+        result["rel_strength"]   = _rel_strength(t, benchmark)
 
     except Exception as exc:
         result["_errore"] = str(exc)
@@ -548,7 +611,7 @@ def calc_vqm_score(metrics: dict) -> dict:
     def pillar_score(defs: list) -> float | None:
         vals = []
         for metric, good, bad, lib in defs:
-            if good is None:   # metrica N/A per questo settore
+            if good is None or bad is None:   # metrica N/A per questo settore
                 continue
             v = metrics.get(metric)
             s = _score_metric(v, good, bad, lib)
@@ -652,12 +715,15 @@ def _ai_comment(row: dict) -> str:
     for k, lbl in [
         ("pe",            "P/E"),
         ("ev_ebitda",     "EV/EBITDA"),
+        ("fcf_yield",     "FCF Yld%"),
         ("roe",           "ROE%"),
+        ("roic",          "ROIC%"),
         ("ebitda_margin", "EBITDA M%"),
         ("de_ratio",      "D/E"),
-        ("eps_cagr_5y",   "EPS CAGR%"),
+        ("eps_cagr_4y",   "EPS CAGR%"),
         ("mom_12m1m",     "Mom 12M%"),
-        ("rel_strength",  "Rel Str"),
+        ("fcf_growth",    "FCF Gr%"),
+        ("eps_rev",       "EPS Rev%"),
     ]:
         v = row.get(k)
         if v is not None:
@@ -692,10 +758,14 @@ def _ai_comment(row: dict) -> str:
         return ""
 
 
-_VALUE_KEYS    = ["ev_ebitda", "p_fcf", "pe", "p_book"]
-_QUALITY_KEYS  = ["roe", "ebitda_margin", "gross_margin", "de_ratio", "eps_cagr_5y"]
-_MOMENTUM_KEYS = ["mom_12m1m", "eps_rev", "rel_strength"]
+_VALUE_KEYS    = ["ev_ebitda", "p_fcf", "pe", "fcf_yield"]
+_QUALITY_KEYS  = ["roe", "ebitda_margin", "roic", "de_ratio", "eps_cagr_4y"]
+_MOMENTUM_KEYS = ["mom_12m1m", "eps_rev", "fcf_growth"]
 _EXTRA_KEYS    = [
+    # calcolati ma non inclusi nei pillar VQM
+    "p_book",          # valore per Financial Services (scorato), extra per gli altri
+    "gross_margin",    # calcolato sempre, usato come ref
+    "rel_strength",    # non scorata nel VQM ma tenuta per analisi storica
     "operating_margin", "profit_margin", "rev_growth", "roa",
     "current_ratio", "dividend_yield", "peg", "52w_change",
 ]
@@ -764,9 +834,8 @@ def _fetch_and_score(ticker: str, benchmark_override: str | None) -> tuple[str, 
 def run_screener(
     tickers: list[str],
     benchmark_override: str | None = None,
-    ai: bool         = False,
-    workers: int     = SCREENER_WORKERS,
-) -> list[dict]:
+    ai: bool = False,
+) -> tuple[list[dict], int | None]:
     """
     Pipeline principale:
       1. Fetch parallelo metriche da Yahoo Finance
@@ -939,6 +1008,13 @@ def main() -> None:
         help="Forza un benchmark unico per tutti i ticker (es. SPY). Default: auto per nazione.",
     )
     parser.add_argument(
+        "--out",
+        type=str,
+        default=None,
+        metavar="FILE",
+        help="Salva i risultati in un file JSON (es. --out report.json).",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         default=False,
@@ -1006,6 +1082,22 @@ def main() -> None:
         sys.exit(0)
 
     elapsed_total = time.perf_counter() - t_start
+
+    # ── Salvataggio --out ───────────────────────────────────────────────────
+    if args.out:
+        try:
+            out_path = os.path.abspath(args.out)
+            with open(out_path, "w", encoding="utf-8") as fp:
+                json.dump(results, fp, ensure_ascii=False, indent=2, default=str)
+            print(
+                f"  {Fore.GREEN}✓{Style.RESET_ALL}  "
+                f"Report salvato: {Fore.WHITE}{out_path}{Style.RESET_ALL}"
+            )
+        except OSError as exc:
+            print(
+                f"  {Fore.RED}✗{Style.RESET_ALL}  "
+                f"Impossibile scrivere --out: {Style.DIM}{exc}{Style.RESET_ALL}"
+            )
 
     # ── Footer ──────────────────────────────────────────────────────────────
     db_info = f"{db_module.POSTGRES_DB} (run_id={run_id})"

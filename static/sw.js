@@ -1,4 +1,4 @@
-const CACHE_NAME = 'vqm-screener-v1';
+const CACHE_NAME = 'vqm-screener-v2';
 const STATIC_ASSETS = [
   '/',
   '/static/app.js',

@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS screener_results (
     p_fcf            NUMERIC(10, 2),
     pe               NUMERIC(10, 2),
     p_book           NUMERIC(10, 2),
+    fcf_yield        NUMERIC(10, 2),
     score_value      NUMERIC(5,  2),
     -- Quality
     roe              NUMERIC(10, 2),
@@ -84,11 +85,14 @@ CREATE TABLE IF NOT EXISTS screener_results (
     gross_margin     NUMERIC(10, 2),
     de_ratio         NUMERIC(10, 2),
     eps_cagr_5y      NUMERIC(10, 2),
+    eps_cagr_4y      NUMERIC(10, 2),
+    roic             NUMERIC(10, 2),
     score_quality    NUMERIC(5,  2),
     -- Momentum
     mom_12m1m        NUMERIC(10, 2),
     eps_rev          NUMERIC(10, 2),
     rel_strength     NUMERIC(10, 2),
+    fcf_growth       NUMERIC(10, 2),
     score_momentum   NUMERIC(5,  2),
     -- Final
     score_finale     NUMERIC(5,  2),
@@ -115,11 +119,19 @@ CREATE INDEX IF NOT EXISTS idx_sr_run_id   ON screener_results(run_id);
 
 
 def ensure_schema() -> None:
-    """Crea tabelle e indici se non esistono."""
+    """Crea tabelle e indici se non esistono; applica migrazioni per colonne nuove."""
     conn = _connect(POSTGRES_DB)
     try:
         with conn.cursor() as cur:
             cur.execute(_DDL)
+            # Migrations: ADD COLUMN IF NOT EXISTS per colonne aggiunte dopo la creazione iniziale
+            for stmt in (
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_yield   NUMERIC(10, 2)",
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS eps_cagr_4y NUMERIC(10, 2)",
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS roic        NUMERIC(10, 2)",
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_growth  NUMERIC(10, 2)",
+            ):
+                cur.execute(stmt)
         conn.commit()
     finally:
         conn.close()
@@ -166,9 +178,9 @@ def load_today_run() -> tuple[int, list[dict]] | None:
                 SELECT
                     ticker, nome, settore, industria, valuta, benchmark,
                     prezzo, mktcap,
-                    ev_ebitda, p_fcf, pe, p_book, score_value,
-                    roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, score_quality,
-                    mom_12m1m, eps_rev, rel_strength, score_momentum,
+                    ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
+                    roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
+                    mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa,
                     current_ratio, dividend_yield, peg, week52_change,
@@ -237,6 +249,7 @@ def save_run(    results: list[dict],
                     _clean(r.get("p_fcf")),
                     _clean(r.get("pe")),
                     _clean(r.get("p_book")),
+                    _clean(r.get("fcf_yield")),
                     _clean(r.get("score_value")),
                     # Quality
                     _clean(r.get("roe")),
@@ -244,11 +257,14 @@ def save_run(    results: list[dict],
                     _clean(r.get("gross_margin")),
                     _clean(r.get("de_ratio")),
                     _clean(r.get("eps_cagr_5y")),
+                    _clean(r.get("eps_cagr_4y")),
+                    _clean(r.get("roic")),
                     _clean(r.get("score_quality")),
                     # Momentum
                     _clean(r.get("mom_12m1m")),
                     _clean(r.get("eps_rev")),
                     _clean(r.get("rel_strength")),
+                    _clean(r.get("fcf_growth")),
                     _clean(r.get("score_momentum")),
                     # Final
                     _clean(r.get("score_finale")),
@@ -274,9 +290,9 @@ def save_run(    results: list[dict],
                 INSERT INTO screener_results (
                     run_id, run_date, ticker, nome, settore, industria, valuta, benchmark,
                     prezzo, mktcap,
-                    ev_ebitda, p_fcf, pe, p_book, score_value,
-                    roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, score_quality,
-                    mom_12m1m, eps_rev, rel_strength, score_momentum,
+                    ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
+                    roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
+                    mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa, current_ratio,
                     dividend_yield, peg, week52_change,

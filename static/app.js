@@ -233,14 +233,24 @@ function cardHTML(r, idx) {
   </div>
 
   <!-- Pillar bars -->
-  <div class="space-y-1.5 mb-3.5">
+  <div class="space-y-1.5 mb-2.5">
     ${miniPillar('V', r.score_value,    '#3b82f6')}
     ${miniPillar('Q', r.score_quality,  '#a855f7')}
     ${miniPillar('M', r.score_momentum, '#f97316')}
   </div>
 
+  <!-- Quick metrics strip -->
+  <div class="qm-strip flex items-center justify-between px-0.5 py-2 mb-1">
+    ${_qm('ROE', r.roe, '%')}
+    ${_qm(r.settore === 'Financial Services' ? 'P/Book' : 'FCF Yld',
+          r.settore === 'Financial Services' ? r.p_book : r.fcf_yield,
+          r.settore === 'Financial Services' ? 'x' : '%')}
+    ${_qm(r.settore === 'Financial Services' ? 'EPS 4Y' : 'ROIC',
+          r.settore === 'Financial Services' ? r.eps_cagr_4y : r.roic, '%')}
+  </div>
+
   <!-- footer -->
-  <div class="flex items-center justify-between pt-2.5 border-t border-white/[.04]">
+  <div class="flex items-center justify-between pt-1.5">
     <span class="text-[11px] text-gray-600 font-medium tabular-nums">${prezzo}</span>
     <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold ${pillClass(cls)}">${cls}</span>
   </div>
@@ -344,7 +354,9 @@ function buildDrawerBody(r) {
       ${mValThr('EV/EBITDA', r.ev_ebitda, 'x',  'ev_ebitda', r.settore)}
       ${mValThr('P/FCF',     r.p_fcf,     'x',  'p_fcf',     r.settore)}
       ${mValThr('P/E',       r.pe,        'x',  'pe',        r.settore)}
-      ${mValThr('P/Book',    r.p_book,    'x',  'p_book',    r.settore)}
+      ${r.settore === 'Financial Services'
+        ? mValThr('P/Book',   r.p_book,   'x',  'p_book',    r.settore)
+        : mValThr('FCF Yield',r.fcf_yield,'%',  'fcf_yield', r.settore)}
     </div>
   </div>
 
@@ -357,9 +369,9 @@ function buildDrawerBody(r) {
     <div class="grid grid-cols-2 gap-2">
       ${mValThr('ROE',           r.roe,          '%', 'roe',          r.settore)}
       ${mValThr('EBITDA Margin', r.ebitda_margin,'%', 'ebitda_margin',r.settore)}
-      ${mValThr('Gross Margin',  r.gross_margin, '%', 'gross_margin', r.settore)}
+      ${mValThr('ROIC',          r.roic,         '%', 'roic',         r.settore)}
       ${mValThr('D/E Ratio',     r.de_ratio,     'x', 'de_ratio',     r.settore)}
-      ${mValThr('EPS CAGR 5Y',   r.eps_cagr_5y,  '%', 'eps_cagr_5y',  r.settore)}
+      ${mValThr('EPS CAGR ~4Y',  r.eps_cagr_4y ?? r.eps_cagr_5y,  '%', 'eps_cagr_4y',  r.settore)}
     </div>
   </div>
 
@@ -370,9 +382,9 @@ function buildDrawerBody(r) {
       <span class="text-[11px] font-semibold text-gray-600 normal-case tracking-normal ml-1">${fmt1(r.score_momentum)} / 10</span>
     </div>
     <div class="grid grid-cols-2 gap-2">
-      ${mValThr('Mom 12M-1M',    r.mom_12m1m,    '%', 'mom_12m1m',    r.settore)}
-      ${mValThr('EPS Revision',  r.eps_rev,      '%', 'eps_rev',      r.settore)}
-      ${mValThr('Rel. Strength', r.rel_strength, '%', 'rel_strength', r.settore)}
+      ${mValThr('Mom 12M-1M',  r.mom_12m1m,  '%', 'mom_12m1m',  r.settore)}
+      ${mValThr('EPS Revision',r.eps_rev,    '%', 'eps_rev',    r.settore)}
+      ${mValThr('FCF Growth',  r.fcf_growth, '%', 'fcf_growth', r.settore)}
     </div>
   </div>
 
@@ -380,6 +392,8 @@ function buildDrawerBody(r) {
   <div>
     <div class="s-head text-gray-600 mb-3">Extra</div>
     <div class="grid grid-cols-2 gap-2">
+      ${mVal('Gross Margin',  r.gross_margin,     '%')}
+      ${r.settore !== 'Financial Services' ? mVal('P/Book', r.p_book, 'x') : ''}
       ${mVal('Op. Margin',    r.operating_margin, '%')}
       ${mVal('Profit Margin', r.profit_margin,    '%')}
       ${mVal('Rev Growth',    r.rev_growth,       '%')}
@@ -388,6 +402,7 @@ function buildDrawerBody(r) {
       ${mVal('Div. Yield',    r.dividend_yield,   '%')}
       ${mVal('PEG',           r.peg,              'x')}
       ${mVal('52W Change',    r.week52_change,    '%')}
+      ${mVal('Rel. Strength', r.rel_strength,     '%')}
     </div>
   </div>
 
@@ -407,6 +422,16 @@ function pillarBar(label, score, color) {
     <span class="text-[11px] font-semibold text-gray-600 w-[58px] shrink-0">${label}</span>
     <div class="pillar-track flex-1"><div class="pillar-fill" style="width:${pct}%;background:${color}"></div></div>
     <span class="text-[12px] font-bold tabular-nums w-7 text-right" style="color:${color}">${txt}</span>
+  </div>`;
+}
+
+// Quick-metric chip used in cards
+function _qm(lbl, val, sym) {
+  const txt = val != null ? fmtNum(val, 1) + '\u00a0' + sym : '—';
+  const dim = val == null;
+  return `<div class="text-center">
+    <div class="qm-lbl">${lbl}</div>
+    <div class="qm-val${dim ? ' dim' : ''}">${txt}</div>
   </div>`;
 }
 
@@ -762,13 +787,15 @@ function renderPortfolioPanel() {
       <div class="s-head text-gray-600 mb-3">Metriche Pesate</div>
       <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
         ${mVal('P/E',          wavg('pe'),            'x')}
-        ${mVal('ROE',          wavg('roe'),           '%')}
-        ${mVal('EBITDA Margin',wavg('ebitda_margin'), '%')}
-        ${mVal('Div. Yield',   wavg('dividend_yield'),'%')}
-        ${mVal('P/Book',       wavg('p_book'),        'x')}
         ${mVal('EV/EBITDA',    wavg('ev_ebitda'),     'x')}
-        ${mVal('ROA',          wavg('roa'),           '%')}
+        ${mVal('FCF Yield',    wavg('fcf_yield'),     '%')}
+        ${mVal('ROE',          wavg('roe'),           '%')}
+        ${mVal('ROIC',         wavg('roic'),          '%')}
+        ${mVal('EBITDA Margin',wavg('ebitda_margin'), '%')}
+        ${mVal('EPS CAGR ~4Y', wavg('eps_cagr_4y'),  '%')}
+        ${mVal('FCF Growth',   wavg('fcf_growth'),    '%')}
         ${mVal('Rev. Growth',  wavg('rev_growth'),    '%')}
+        ${mVal('Div. Yield',   wavg('dividend_yield'),'%')}
       </div>
     </div>
   `;
@@ -807,7 +834,7 @@ function mRow(label, value) {
 }
 
 function mVal(label, value, unit) {
-  const isN = value == null || value === 0;
+  const isN = value == null;
   const txt  = isN ? '—' : fmtNum(value, 2) + '\u00a0' + unit;
   return `
   <div class="m-tile">
