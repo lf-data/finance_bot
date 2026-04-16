@@ -325,6 +325,33 @@
   <div id="portfolio-body" class="flex-1 overflow-y-auto px-6 py-5 space-y-5"></div>
 </div>
 
+<!-- ═══════════════════════════ SHARES MODAL ════════════════════════════════ -->
+<div id="shares-modal" class="hidden fixed inset-0 z-[70] flex items-end sm:items-center justify-center p-4"
+     style="background:rgba(0,0,0,.65);backdrop-filter:blur(6px)">
+  <div class="w-full max-w-[320px] rounded-2xl p-5 space-y-4"
+       style="background:#17171f;border:1px solid rgba(255,255,255,.09);box-shadow:0 24px 64px rgba(0,0,0,.8)">
+    <div>
+      <div class="text-[13px] font-bold truncate" id="shares-modal-title">Aggiungi al portafoglio</div>
+      <div class="text-[11px] text-gray-600 mt-0.5">Inserisci il numero di titoli posseduti</div>
+    </div>
+    <div>
+      <label class="text-[11px] font-semibold text-gray-500 block mb-1.5">Numero titoli</label>
+      <input id="shares-input" type="number" min="1" step="1" value="1"
+        class="w-full bg-white/[.04] border border-white/[.09] rounded-xl px-3.5 py-2.5
+               text-[15px] font-semibold text-gray-100 focus:outline-none focus:ring-2
+               focus:ring-accent/40 focus:border-accent/40 transition text-center tabular-nums"/>
+    </div>
+    <div class="flex gap-2 pt-1">
+      <button onclick="cancelSharesModal()"
+        class="flex-1 rounded-xl py-2.5 text-[13px] font-semibold text-gray-500
+               border border-white/[.07] hover:bg-white/[.04] transition">Annulla</button>
+      <button onclick="confirmSharesModal()"
+        class="flex-1 rounded-xl py-2.5 text-[13px] font-bold text-black transition
+               hover:opacity-90 active:scale-[.98]" style="background:#00d084">Conferma</button>
+    </div>
+  </div>
+</div>
+
 <script src="/static/app.js"></script>
 </body>
 </html>

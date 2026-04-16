@@ -62,8 +62,11 @@ def index():
 @app.route("/sw.js")
 def service_worker():
     """Serve il service worker dalla root per avere scope completo."""
-    return send_from_directory("static", "sw.js",
+    resp = send_from_directory("static", "sw.js",
                                mimetype="application/javascript")
+    resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-cache"
+    return resp
 
 
 @app.route("/api/tickers")

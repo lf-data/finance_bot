@@ -5,7 +5,20 @@ let allData      = [];
 let activeFilter = 'ALL';
 let sortBy       = 'score';
 let historyChart = null;
-let portfolio    = new Set(JSON.parse(localStorage.getItem('vqm_portfolio') || '[]'));
+// portfolio: Map<ticker, shares>
+let portfolio    = new Map(Object.entries(JSON.parse(localStorage.getItem('vqm_portfolio_v2') || '{}')));
+// Migrazione da vecchio storage Set-based (eseguita una volta sola)
+(function() {
+  if (!localStorage.getItem('vqm_portfolio_v2')) {
+    try {
+      const old = JSON.parse(localStorage.getItem('vqm_portfolio') || '[]');
+      if (Array.isArray(old)) old.forEach(t => portfolio.set(t, 1));
+      if (portfolio.size) localStorage.setItem('vqm_portfolio_v2', JSON.stringify(Object.fromEntries(portfolio)));
+    } catch {}
+  }
+})();
+let portfolioChart      = null;
+let _sharesModalTicker  = null;
 let thresholds   = {};   // {settore: {metrica: {good, bad, lower_is_better}}}
 
 // Colour helpers (shared)
@@ -22,6 +35,19 @@ document.addEventListener('DOMContentLoaded', () => {
   loadLastRunLabel();
   loadThresholds();
   updatePortfolioBadge();
+  document.getElementById('shares-input')?.addEventListener('keydown', e => {
+    if (e.key === 'Enter')  confirmSharesModal();
+    if (e.key === 'Escape') cancelSharesModal();
+  });
+  // Se lo screener era già in corso prima del refresh, riattacca il polling
+  fetch('/api/run-screener/status').then(r => r.json()).then(({ running }) => {
+    if (running) {
+      const btn   = document.getElementById('run-btn');
+      const icon  = document.getElementById('run-icon');
+      const label = document.getElementById('run-label');
+      _pollScreener(btn, icon, label);
+    }
+  }).catch(() => {});
 });
 
 // ── API ──────────────────────────────────────────────────────────────────────
@@ -442,28 +468,68 @@ function initSearch() {
 
 // ── Portfolio ─────────────────────────────────────────────────────────────────
 function savePortfolio() {
-  localStorage.setItem('vqm_portfolio', JSON.stringify([...portfolio]));
+  localStorage.setItem('vqm_portfolio_v2', JSON.stringify(Object.fromEntries(portfolio)));
 }
 
 function togglePortfolio(btnEl, event) {
   event.stopPropagation();
   const ticker = btnEl.dataset.ticker;
-  const card   = document.getElementById(`card-${ticker}`);
   if (portfolio.has(ticker)) {
     portfolio.delete(ticker);
-    btnEl.textContent = '☆';
-    btnEl.classList.remove('text-yellow-400');
-    btnEl.classList.add('text-gray-700');
-    card?.classList.remove('in-portfolio');
+    _updatePortfolioBtnState(ticker, false);
+    savePortfolio();
+    updatePortfolioBadge();
   } else {
-    portfolio.add(ticker);
-    btnEl.textContent = '★';
-    btnEl.classList.remove('text-gray-700');
-    btnEl.classList.add('text-yellow-400');
-    card?.classList.add('in-portfolio');
+    _openSharesModal(ticker);
   }
+}
+
+function _updatePortfolioBtnState(ticker, inPort) {
+  const btn  = document.getElementById(`port-btn-${ticker}`);
+  const card = document.getElementById(`card-${ticker}`);
+  if (btn) {
+    btn.textContent = inPort ? '★' : '☆';
+    btn.classList.toggle('text-yellow-400', inPort);
+    btn.classList.toggle('text-gray-700', !inPort);
+  }
+  card?.classList.toggle('in-portfolio', inPort);
+}
+
+function _openSharesModal(ticker) {
+  _sharesModalTicker = ticker;
+  const r = allData.find(x => x.ticker === ticker);
+  document.getElementById('shares-modal-title').textContent =
+    ticker + (r?.nome ? ' \u2014 ' + r.nome : '');
+  document.getElementById('shares-input').value = portfolio.get(ticker) ?? 1;
+  document.getElementById('shares-modal').classList.remove('hidden');
+  setTimeout(() => {
+    const inp = document.getElementById('shares-input');
+    inp.focus(); inp.select();
+  }, 50);
+}
+
+function cancelSharesModal() {
+  _sharesModalTicker = null;
+  document.getElementById('shares-modal').classList.add('hidden');
+}
+
+function confirmSharesModal() {
+  if (!_sharesModalTicker) return;
+  const shares = Math.max(1, parseInt(document.getElementById('shares-input').value, 10) || 1);
+  portfolio.set(_sharesModalTicker, shares);
+  _updatePortfolioBtnState(_sharesModalTicker, true);
   savePortfolio();
   updatePortfolioBadge();
+  document.getElementById('shares-modal').classList.add('hidden');
+  _sharesModalTicker = null;
+  // Aggiorna il panel se già aperto
+  const panel = document.getElementById('portfolio-panel');
+  if (panel && !panel.classList.contains('translate-y-full')) renderPortfolioPanel();
+}
+
+function editShares(ticker, event) {
+  event.stopPropagation();
+  _openSharesModal(ticker);
 }
 
 function updatePortfolioBadge() {
@@ -502,6 +568,7 @@ function openPortfolio() {
 function closePortfolio() {
   document.getElementById('portfolio-panel').classList.add('translate-y-full');
   document.getElementById('portfolio-overlay').classList.add('hidden');
+  if (portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
 }
 
 function portTickerClick(el) {
@@ -516,9 +583,7 @@ function removeFromPortfolio(ticker, event) {
   portfolio.delete(ticker);
   savePortfolio();
   updatePortfolioBadge();
-  const btn = document.getElementById(`port-btn-${ticker}`);
-  if (btn) { btn.textContent = '☆'; btn.classList.replace('text-yellow-400','text-gray-700'); }
-  document.getElementById(`card-${ticker}`)?.classList.remove('in-portfolio');
+  _updatePortfolioBtnState(ticker, false);
   if (!portfolio.size) { closePortfolio(); return; }
   renderPortfolioPanel();
 }
@@ -534,26 +599,45 @@ function renderPortfolioPanel() {
     return;
   }
 
-  const avg = key => {
-    const vals = items.map(r => r[key]).filter(v => v != null);
-    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+  // Arricchisci ogni posizione con shares e valore €
+  const positions = items.map(r => {
+    const shares = portfolio.get(r.ticker) ?? 1;
+    const posVal = r.prezzo != null ? shares * r.prezzo : null;
+    return { ...r, shares, posVal };
+  });
+
+  const hasValues  = positions.some(p => p.posVal != null);
+  const totalValue = hasValues ? positions.reduce((s, p) => s + (p.posVal ?? 0), 0) : null;
+
+  // Peso: per valore € se disponibile, altrimenti equi-pesato
+  const getW = p => {
+    if (hasValues && totalValue > 0) return p.posVal != null ? p.posVal / totalValue : 0;
+    return 1 / n;
+  };
+  const ws = positions.map(getW);
+
+  // Media ponderata (solo valori non-null)
+  const wavg = key => {
+    let sum = 0, wsum = 0;
+    positions.forEach((p, i) => { const v = p[key]; if (v != null) { sum += v * ws[i]; wsum += ws[i]; } });
+    return wsum > 0 ? sum / wsum : null;
   };
 
-  const buyC  = items.filter(r => r.classificazione === 'BUY').length;
-  const holdC = items.filter(r => r.classificazione === 'HOLD').length;
-  const sellC = items.filter(r => r.classificazione === 'SELL').length;
+  const buyC  = positions.filter(r => r.classificazione === 'BUY').length;
+  const holdC = positions.filter(r => r.classificazione === 'HOLD').length;
+  const sellC = positions.filter(r => r.classificazione === 'SELL').length;
 
-  const sectorMap = {};
-  items.forEach(r => { const s = r.settore ?? 'N/D'; sectorMap[s] = (sectorMap[s] || 0) + 1; });
-  const sectors = Object.entries(sectorMap).sort((a, b) => b[1] - a[1]);
-  const sorted  = [...items].sort((a, b) => (b.score_finale ?? -1) - (a.score_finale ?? -1));
+  // Ordina per valore decrescente (o score se manca il prezzo)
+  const sorted = [...positions].sort((a, b) =>
+    (b.posVal ?? b.score_finale ?? -1) - (a.posVal ?? a.score_finale ?? -1)
+  );
 
-  const avgScore = avg('score_finale');
+  const avgScore  = wavg('score_finale');
   const avgOffset = avgScore != null ? 251.2 - (251.2 * avgScore / 10) : 251.2;
   const avgCol    = avgScore != null ? (avgScore >= 7.5 ? '#00d084' : avgScore >= 5 ? '#fbbf24' : '#f87171') : '#52525e';
 
   document.getElementById('portfolio-body').innerHTML = `
-    <!-- Signal sheet -->
+    <!-- Signal sheet + avg score -->
     <div class="grid grid-cols-4 gap-2.5">
       <div class="rounded-2xl p-3.5 text-center" style="background:rgba(0,208,132,.07);border:1px solid rgba(0,208,132,.18)">
         <div class="text-2xl font-black" style="color:#00d084">${buyC}</div>
@@ -567,7 +651,6 @@ function renderPortfolioPanel() {
         <div class="text-2xl font-black text-red-400">${sellC}</div>
         <div class="text-[10px] font-bold text-gray-600 uppercase tracking-widest mt-0.5">SELL</div>
       </div>
-      <!-- Score medio ring -->
       <div class="rounded-2xl p-3.5 flex flex-col items-center justify-center gap-0.5"
            style="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.06)">
         <div class="relative w-10 h-10">
@@ -583,71 +666,93 @@ function renderPortfolioPanel() {
       </div>
     </div>
 
-    <!-- Avg pillars -->
+    <!-- Grafico a torta composizione -->
+    <div>
+      <div class="s-head text-gray-600 mb-3">
+        Composizione
+        ${totalValue ? `<span class="text-gray-700 normal-case tracking-normal font-medium">· ${fmtMktCap(totalValue)}</span>` : ''}
+      </div>
+      <div class="rounded-2xl p-3" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)">
+        <canvas id="portfolio-pie" height="200"></canvas>
+      </div>
+    </div>
+
+    <!-- Score pesati per valore -->
     <div class="rounded-2xl p-4" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.055)">
-      <div class="s-head text-gray-600 mb-3">Score Medi</div>
+      <div class="s-head text-gray-600 mb-3">
+        Score Pesati
+        ${hasValues ? '<span class="text-[10px] font-medium text-gray-700 normal-case tracking-normal">(per valore &euro;)</span>' : ''}
+      </div>
       <div class="space-y-2.5">
-        ${pillarBar('Value',    avg('score_value'),    '#3b82f6')}
-        ${pillarBar('Quality',  avg('score_quality'),  '#a855f7')}
-        ${pillarBar('Momentum', avg('score_momentum'), '#f97316')}
+        ${pillarBar('Value',    wavg('score_value'),    '#3b82f6')}
+        ${pillarBar('Quality',  wavg('score_quality'),  '#a855f7')}
+        ${pillarBar('Momentum', wavg('score_momentum'), '#f97316')}
       </div>
     </div>
 
-    <!-- Aggregate metrics -->
-    <div>
-      <div class="s-head text-gray-600 mb-3">Metriche Medie</div>
-      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
-        ${mVal('P/E',          avg('pe'),             'x')}
-        ${mVal('ROE',          avg('roe'),            '%')}
-        ${mVal('EBITDA Margin',avg('ebitda_margin'),  '%')}
-        ${mVal('Div. Yield',   avg('dividend_yield'), '%')}
-        ${mVal('P/Book',       avg('p_book'),         'x')}
-        ${mVal('EV/EBITDA',    avg('ev_ebitda'),      'x')}
-        ${mVal('ROA',          avg('roa'),            '%')}
-        ${mVal('Rev. Growth',  avg('rev_growth'),     '%')}
-      </div>
-    </div>
-
-    <!-- Sectors -->
-    <div>
-      <div class="s-head text-gray-600 mb-3">Settori (${sectors.length})</div>
-      <div class="flex flex-wrap gap-2">
-        ${sectors.map(([s, c]) => `
-          <span class="flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold"
-                style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);color:#9ca3af">
-            ${esc(s)}
-            <span class="text-gray-600 font-bold">${c}</span>
-          </span>`).join('')}
-      </div>
-    </div>
-
-    <!-- Ticker list -->
+    <!-- Ticker list con shares, valore e peso -->
     <div>
       <div class="s-head text-gray-600 mb-3">Titoli (${n})</div>
       <div class="space-y-1.5">
-        ${sorted.map(r => {
-          const col = clsColor(r.classificazione ?? 'N/D');
+        ${sorted.map(p => {
+          const col    = clsColor(p.classificazione ?? 'N/D');
+          const wPct   = hasValues && totalValue > 0 && p.posVal != null
+                         ? (p.posVal / totalValue * 100).toFixed(1) + '%'
+                         : (100 / n).toFixed(1) + '%';
+          const valStr = p.posVal != null
+                         ? fmtNum(p.posVal, 0) + '\u00a0' + (p.valuta ?? '€')
+                         : '—';
+          const barW   = Math.max(3, Math.min(60, parseFloat(wPct) * 1.5));
           return `
-          <div class="flex items-center gap-3 rounded-xl px-3.5 py-2.5 cursor-pointer group transition-all"
+          <div class="rounded-xl overflow-hidden cursor-pointer transition-all"
                style="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05)"
-               data-ticker="${esc(r.ticker)}" onclick="portTickerClick(this)"
+               onclick="portTickerClick(this)" data-ticker="${esc(p.ticker)}"
                onmouseenter="this.style.background='rgba(255,255,255,.04)'"
                onmouseleave="this.style.background='rgba(255,255,255,.025)'">
-            <div class="w-2 h-2 rounded-full shrink-0" style="background:${col};box-shadow:0 0 5px ${col}88"></div>
-            <div class="flex-1 min-w-0">
-              <span class="font-bold text-[13px]">${esc(r.ticker)}</span>
-              <span class="ml-2 text-[11px] text-gray-600 truncate">${esc(r.nome ?? '')}</span>
+            <div class="flex items-center gap-2.5 px-3.5 pt-2.5 pb-1">
+              <div class="w-2 h-2 rounded-full shrink-0" style="background:${col};box-shadow:0 0 5px ${col}88"></div>
+              <div class="flex-1 min-w-0">
+                <span class="font-bold text-[13px]">${esc(p.ticker)}</span>
+                <span class="ml-1.5 text-[11px] text-gray-600">${esc(p.nome ?? '')}</span>
+              </div>
+              <span class="text-[13px] font-black tabular-nums" style="color:${col}">${fmt1(p.score_finale)}</span>
+              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${pillClass(p.classificazione ?? 'N/D')}">${p.classificazione ?? 'N/D'}</span>
+              <button data-ticker="${esc(p.ticker)}" onclick="editShares(this.dataset.ticker,event)"
+                class="text-gray-600 hover:text-accent transition text-[13px] leading-none shrink-0" title="Modifica quantit\u00e0">&#x270E;</button>
+              <button data-ticker="${esc(p.ticker)}" onclick="removeFromPortfolio(this.dataset.ticker,event)"
+                class="text-gray-700 hover:text-red-400 transition text-[16px] leading-none shrink-0">&times;</button>
             </div>
-            <span class="text-[13px] font-black tabular-nums" style="color:${col}">${fmt1(r.score_finale)}</span>
-            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${pillClass(r.classificazione ?? 'N/D')}">${r.classificazione ?? 'N/D'}</span>
-            <button data-ticker="${esc(r.ticker)}"
-              onclick="removeFromPortfolio(this.dataset.ticker,event)"
-              class="text-gray-700 hover:text-red-400 transition text-[15px] leading-none ml-0.5 shrink-0">&times;</button>
+            <div class="flex items-center gap-2.5 px-3.5 pb-2" style="padding-left:2.3rem">
+              <span class="text-[11px] font-semibold text-gray-600">${p.shares}&#x202F;&times;</span>
+              ${p.prezzo != null ? `<span class="text-[11px] text-gray-700">@ ${fmtNum(p.prezzo, 2)}</span>` : ''}
+              <span class="text-[11px] font-semibold text-gray-400">${valStr}</span>
+              <div class="ml-auto flex items-center gap-1.5">
+                <div class="h-1.5 rounded-full" style="width:${barW}px;background:${col}77"></div>
+                <span class="text-[11px] font-bold tabular-nums" style="color:${col}cc">${wPct}</span>
+              </div>
+            </div>
           </div>`;
         }).join('')}
       </div>
     </div>
+
+    <!-- Metriche pesate per valore -->
+    <div>
+      <div class="s-head text-gray-600 mb-3">Metriche Pesate</div>
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        ${mVal('P/E',          wavg('pe'),            'x')}
+        ${mVal('ROE',          wavg('roe'),           '%')}
+        ${mVal('EBITDA Margin',wavg('ebitda_margin'), '%')}
+        ${mVal('Div. Yield',   wavg('dividend_yield'),'%')}
+        ${mVal('P/Book',       wavg('p_book'),        'x')}
+        ${mVal('EV/EBITDA',    wavg('ev_ebitda'),     'x')}
+        ${mVal('ROA',          wavg('roa'),           '%')}
+        ${mVal('Rev. Growth',  wavg('rev_growth'),    '%')}
+      </div>
+    </div>
   `;
+
+  _renderPortfolioPie(sorted, hasValues, totalValue);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -745,6 +850,62 @@ function mValThr(label, value, unit, metricKey, sector) {
   </div>`;
 }
 
+// ── Portfolio Pie Chart ──────────────────────────────────────────────────────
+function _renderPortfolioPie(sorted, hasValues, totalValue) {
+  const canvas = document.getElementById('portfolio-pie');
+  if (!canvas) return;
+  if (portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
+
+  const labels = sorted.map(p => p.ticker);
+  const data   = sorted.map(p => {
+    if (hasValues && totalValue > 0)
+      return p.posVal != null ? +((p.posVal / totalValue) * 100).toFixed(2) : 0;
+    return +(100 / sorted.length).toFixed(2);
+  });
+  const colors = _pieColors(sorted.length);
+
+  portfolioChart = new Chart(canvas, {
+    type: 'doughnut',
+    data: {
+      labels,
+      datasets: [{
+        data,
+        backgroundColor: colors.map(c => c + 'cc'),
+        borderColor:     colors.map(c => c + '55'),
+        borderWidth: 1,
+        hoverBorderWidth: 2,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '62%',
+      plugins: {
+        legend: {
+          position: 'right',
+          labels: { color:'#6b7280', boxWidth:10, font:{ size:10 }, padding:8 }
+        },
+        tooltip: {
+          backgroundColor:'#17171f', titleColor:'#f9fafb', bodyColor:'#9ca3af',
+          borderColor:'rgba(255,255,255,.08)', borderWidth:1, cornerRadius:10, padding:10,
+          callbacks: { label: ctx => ` ${ctx.label}: ${ctx.parsed.toFixed(1)}%` }
+        }
+      }
+    }
+  });
+}
+
+function _pieColors(n) {
+  const palette = ['#00d084','#3b82f6','#a855f7','#f97316','#fbbf24',
+                   '#ec4899','#14b8a6','#6366f1','#84cc16','#0ea5e9','#f43f5e','#8b5cf6'];
+  if (n <= palette.length) return palette.slice(0, n);
+  const colors = [...palette];
+  for (let i = palette.length; i < n; i++) {
+    colors.push(`hsl(${(i * 137.5) % 360},70%,55%)`);
+  }
+  return colors;
+}
+
 // ── PWA Install ───────────────────────────────────────────────────────────────
 let _pwaPrompt = null;
 
@@ -770,7 +931,7 @@ function pwaInstall() {
 // ── Service Worker registration ────────────────────────────────────────────────
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js')
+    navigator.serviceWorker.register('/sw.js', { scope: '/' })
       .catch((err) => console.warn('SW registration failed:', err));
   });
 }
