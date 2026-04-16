@@ -20,6 +20,7 @@ let portfolio    = new Map(Object.entries(JSON.parse(localStorage.getItem('vqm_p
 let portfolioChart      = null;
 let _sharesModalTicker  = null;
 let thresholds   = {};   // {settore: {metrica: {good, bad, lower_is_better}}}
+let fxRates      = { EUR: 1.0 };  // tassi → EUR, aggiornati da /api/fx-rates
 
 // Colour helpers (shared)
 const CLS_COLOR  = { BUY:'#00d084', HOLD:'#fbbf24', SELL:'#f87171' };
@@ -34,6 +35,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadLatest();
   loadLastRunLabel();
   loadThresholds();
+  loadFxRates();
   updatePortfolioBadge();
   document.getElementById('shares-input')?.addEventListener('keydown', e => {
     if (e.key === 'Enter')  confirmSharesModal();
@@ -90,6 +92,13 @@ async function loadThresholds() {
   try {
     const res = await fetch('/api/thresholds');
     if (res.ok) thresholds = await res.json();
+  } catch { /* silent */ }
+}
+
+async function loadFxRates() {
+  try {
+    const res = await fetch('/api/fx-rates');
+    if (res.ok) fxRates = await res.json();
   } catch { /* silent */ }
 }
 
@@ -599,11 +608,19 @@ function renderPortfolioPanel() {
     return;
   }
 
-  // Arricchisci ogni posizione con shares e valore €
+  // Arricchisci ogni posizione con shares e valore in EUR
+  const toEur = (amount, currency) => {
+    if (amount == null) return null;
+    const rate = fxRates[(currency || 'EUR').toUpperCase()] ?? null;
+    return rate ? amount * rate : amount;  // se tasso sconosciuto usa valore nominale
+  };
+
   const positions = items.map(r => {
-    const shares = portfolio.get(r.ticker) ?? 1;
-    const posVal = r.prezzo != null ? shares * r.prezzo : null;
-    return { ...r, shares, posVal };
+    const shares     = portfolio.get(r.ticker) ?? 1;
+    const posValNom  = r.prezzo != null ? shares * r.prezzo : null;          // valuta originale
+    const posVal     = posValNom != null ? toEur(posValNom, r.valuta) : null; // in EUR
+    const rateUsed   = (fxRates[(r.valuta || 'EUR').toUpperCase()] ?? null);
+    return { ...r, shares, posVal, posValNom, rateUsed };
   });
 
   const hasValues  = positions.some(p => p.posVal != null);
@@ -670,7 +687,7 @@ function renderPortfolioPanel() {
     <div>
       <div class="s-head text-gray-600 mb-3">
         Composizione
-        ${totalValue ? `<span class="text-gray-700 normal-case tracking-normal font-medium">· ${fmtMktCap(totalValue)}</span>` : ''}
+        ${totalValue ? `<span class="text-gray-700 normal-case tracking-normal font-medium">· ${fmtMktCap(totalValue)}\u00a0EUR</span>` : ''}
       </div>
       <div class="rounded-2xl p-3" style="background:rgba(255,255,255,.02);border:1px solid rgba(255,255,255,.05)">
         <canvas id="portfolio-pie" height="200"></canvas>
@@ -699,9 +716,13 @@ function renderPortfolioPanel() {
           const wPct   = hasValues && totalValue > 0 && p.posVal != null
                          ? (p.posVal / totalValue * 100).toFixed(1) + '%'
                          : (100 / n).toFixed(1) + '%';
-          const valStr = p.posVal != null
-                         ? fmtNum(p.posVal, 0) + '\u00a0' + (p.valuta ?? '€')
-                         : '—';
+          const valStr = (() => {
+            if (p.posValNom == null) return '—';
+            const origCur = (p.valuta || 'EUR').toUpperCase();
+            const orig    = fmtNum(p.posValNom, 0) + '\u00a0' + origCur;
+            if (origCur === 'EUR' || p.posVal == null || p.rateUsed == null) return orig;
+            return orig + ' ≈ ' + fmtNum(p.posVal, 0) + '\u00a0EUR';
+          })();
           const barW   = Math.max(3, Math.min(60, parseFloat(wPct) * 1.5));
           return `
           <div class="rounded-xl overflow-hidden cursor-pointer transition-all"

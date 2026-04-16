@@ -5,6 +5,7 @@ import datetime
 import json as _json
 import os
 import threading
+import time as _time
 
 from flask import Flask, jsonify, render_template, request, send_from_directory
 import psycopg2
@@ -207,6 +208,46 @@ def api_run_screener():
 def api_run_screener_status():
     """Stato corrente dell'esecuzione: {running, error}."""
     return jsonify(_run_status)
+
+
+# ── FX rates (cached 1h) ─────────────────────────────────────────────────────
+
+_fx_cache: dict = {"rates": {"EUR": 1.0}, "ts": 0.0}
+_FX_TTL = 3600  # 1 ora
+
+
+@app.route("/api/fx-rates")
+def api_fx_rates():
+    """Tassi di cambio verso EUR, cachati 1h. Usa yfinance come fonte."""
+    if _time.time() - _fx_cache["ts"] < _FX_TTL:
+        return jsonify(_fx_cache["rates"])
+    try:
+        import yfinance as yf
+        pairs = {
+            "USD": "USDEUR=X",
+            "CHF": "CHFEUR=X",
+            "GBP": "GBPEUR=X",
+            "JPY": "JPYEUR=X",
+            "SEK": "SEKEUR=X",
+            "NOK": "NOKEUR=X",
+            "DKK": "DKKEUR=X",
+        }
+        rates: dict = {"EUR": 1.0}
+        for currency, symbol in pairs.items():
+            try:
+                info = yf.Ticker(symbol).fast_info
+                price = getattr(info, "last_price", None) or getattr(info, "regular_market_previous_close", None)
+                if price and price > 0:
+                    rates[currency] = round(float(price), 6)
+            except Exception:
+                pass
+        if len(rates) > 1:  # almeno un tasso ottenuto
+            _fx_cache["rates"] = rates
+            _fx_cache["ts"]    = _time.time()
+        return jsonify(_fx_cache["rates"])
+    except Exception as exc:
+        app.logger.warning("FX rates fetch fallito: %s", exc)
+        return jsonify(_fx_cache["rates"])
 
 
 if __name__ == "__main__":
