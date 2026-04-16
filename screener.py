@@ -20,6 +20,8 @@ import os
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
+from curl_cffi import requests as curl_requests
 import pandas as pd
 import yfinance as yf
 import colorama
@@ -36,6 +38,17 @@ from config import (
 
 logging.disable(logging.CRITICAL)
 colorama.init(autoreset=True)
+
+# Per-thread curl_cffi sessions: curl_cffi.requests.Session is not thread-safe
+# when shared across concurrent workers — parallel requests corrupt each other's
+# responses and produce "Failed to parse json" errors from Yahoo Finance.
+# threading.local() ensures every worker thread gets its own session instance.
+_local = threading.local()
+
+def _get_yf_session() -> curl_requests.Session:
+    if not hasattr(_local, "session"):
+        _local.session = curl_requests.Session(impersonate="chrome")
+    return _local.session
 
 
 # ── CLI HELPERS ───────────────────────────────────────────────────────────────
@@ -117,7 +130,7 @@ def _rel_strength(ticker_obj: yf.Ticker, benchmark: str = "FTSEMIB.MI") -> float
         if hist_t.empty:
             return None
         if benchmark not in _bm_history_cache:
-            _bm_history_cache[benchmark] = yf.Ticker(benchmark).history(
+            _bm_history_cache[benchmark] = yf.Ticker(benchmark, session=_get_yf_session()).history(
                 period="12mo", auto_adjust=True
             )
         hist_b = _bm_history_cache[benchmark]
@@ -231,7 +244,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
     """
     result: dict = {"ticker": ticker}
     try:
-        t    = yf.Ticker(ticker)
+        t    = yf.Ticker(ticker, session=_get_yf_session())
         info = t.info or {}
 
         # ── Info base (sempre da info — non presenti negli statements) ─────

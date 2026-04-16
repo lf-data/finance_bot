@@ -108,6 +108,13 @@
     /* Drawer */
     #drawer { border-left:1px solid rgba(255,255,255,.06); }
     #portfolio-panel { border-top:1px solid rgba(255,255,255,.06); }
+
+    /* Spinning refresh icon */
+    .spin { animation: spin .7s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Run button – loading state */
+    #run-btn[disabled] { opacity:.5; pointer-events:none; }
   </style>
 </head>
 
@@ -154,6 +161,30 @@
                  min-w-[18px] h-[18px] flex items-center justify-center text-[10px] px-1 leading-none">0</span>
       </button>
       <span class="hidden sm:block text-[11px] text-gray-700 font-medium" id="last-run-label"></span>
+
+      <!-- Refresh button -->
+      <button id="refresh-btn" onclick="refreshData()" title="Aggiorna dati"
+        class="flex items-center justify-center w-8 h-8 rounded-full border border-white/[.07]
+               text-gray-500 transition-all duration-200 hover:text-gray-200 hover:border-white/[.14]
+               hover:bg-white/[.05] active:scale-95">
+        <svg id="refresh-icon" width="13" height="13" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/>
+          <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+        </svg>
+      </button>
+
+      <!-- Run Screener button -->
+      <button id="run-btn" onclick="runScreener()"
+        class="flex items-center gap-1.5 text-[11px] font-bold px-3.5 py-2 rounded-full
+               border border-accent/40 text-accent transition-all duration-200
+               hover:bg-accent/10 active:scale-95 shrink-0">
+        <svg id="run-icon" width="11" height="11" viewBox="0 0 24 24" fill="currentColor">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+        <span id="run-label">Screener</span>
+      </button>
+
       <!-- PWA Install button – shown only when browser fires beforeinstallprompt -->
       <button id="pwa-install-btn" onclick="pwaInstall()"
         class="hidden items-center gap-1.5 text-[11px] font-bold px-3.5 py-2 rounded-full

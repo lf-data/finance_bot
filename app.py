@@ -1,17 +1,14 @@
 """Flask web interface for the VQM Screener dashboard."""
 
-import atexit
 import decimal
 import datetime
 import json as _json
 import os
 import threading
 
-from flask import Flask, jsonify, render_template, send_from_directory
+from flask import Flask, jsonify, render_template, request, send_from_directory
 import psycopg2
 import psycopg2.extras
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 
 from config import (
     POSTGRES_DB,
@@ -173,34 +170,40 @@ def api_latest():
     return jsonify(rows)
 
 
-# ── Scheduler ────────────────────────────────────────────────────────────────
+# ── Manual screener run ──────────────────────────────────────────────────────
 
-def _scheduled_run(force: bool = False) -> None:
-    """Eseguito dallo scheduler: skip se un run di oggi è già presente (a meno che force=True)."""
-    import db as db_module
+_run_lock   = threading.Lock()
+_run_status: dict = {"running": False, "error": None}
+
+
+def _do_run() -> None:
     from screener import run_screener, DEFAULT_TICKERS
-
-    if not force and db_module.load_today_run() is not None:
-        app.logger.info("Scheduler: run di oggi già presente, skip.")
-        return
-    app.logger.info("Scheduler: avvio run automatico (force=%s)...", force)
     try:
         run_screener(DEFAULT_TICKERS)
-        app.logger.info("Scheduler: run completato.")
+        _run_status["error"] = None
     except Exception as exc:  # noqa: BLE001
-        app.logger.error("Scheduler: run fallito — %s", exc)
+        app.logger.error("Screener run fallito — %s", exc)
+        _run_status["error"] = str(exc)
+    finally:
+        _run_status["running"] = False
+        _run_lock.release()
 
 
-_scheduler = BackgroundScheduler(daemon=True)
-_scheduler.add_job(_scheduled_run, CronTrigger(hour=0, minute=0))  # mezzanotte ogni giorno
-_scheduler.start()
-atexit.register(lambda: _scheduler.shutdown(wait=False))
+@app.route("/api/run-screener", methods=["POST"])
+def api_run_screener():
+    """Avvia lo screener in background. Se già in esecuzione restituisce 409."""
+    if not _run_lock.acquire(blocking=False):
+        return jsonify({"running": True, "error": None}), 409
+    _run_status["running"] = True
+    _run_status["error"]   = None
+    threading.Thread(target=_do_run, daemon=True, name="screener-manual").start()
+    return jsonify({"running": True, "error": None}), 202
 
-# All'avvio del server esegue sempre un run forzato (ignora run già salvati oggi)
-threading.Thread(
-    target=_scheduled_run, kwargs={"force": True},
-    daemon=True, name="screener-startup",
-).start()
+
+@app.route("/api/run-screener/status")
+def api_run_screener_status():
+    """Stato corrente dell'esecuzione: {running, error}."""
+    return jsonify(_run_status)
 
 
 if __name__ == "__main__":

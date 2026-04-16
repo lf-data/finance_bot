@@ -67,6 +67,61 @@ async function loadThresholds() {
   } catch { /* silent */ }
 }
 
+// ── Refresh (ricarica dati dal DB senza rieseguire lo screener) ───────────────
+async function refreshData() {
+  const icon = document.getElementById('refresh-icon');
+  icon.classList.add('spin');
+  await loadLatest();
+  await loadLastRunLabel();
+  icon.classList.remove('spin');
+}
+
+// ── Run Screener (avvia esecuzione + polling) ────────────────────────────────
+async function runScreener() {
+  const btn   = document.getElementById('run-btn');
+  const icon  = document.getElementById('run-icon');
+  const label = document.getElementById('run-label');
+
+  // Avvia run
+  const res = await fetch('/api/run-screener', { method: 'POST' });
+  if (res.status === 409) {
+    // Già in esecuzione — aggancia comunque il polling
+    _pollScreener(btn, icon, label);
+    return;
+  }
+  if (!res.ok) return;
+
+  _pollScreener(btn, icon, label);
+}
+
+function _pollScreener(btn, icon, label) {
+  btn.disabled = true;
+  // Sostituisce icona play con spinner
+  icon.outerHTML = `<svg id="run-icon" class="spin" width="11" height="11" viewBox="0 0 24 24"
+    fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+  </svg>`;
+  label.textContent = 'In corso…';
+
+  const interval = setInterval(async () => {
+    try {
+      const s = await fetch('/api/run-screener/status');
+      const { running, error } = await s.json();
+      if (!running) {
+        clearInterval(interval);
+        // Ripristina pulsante
+        btn.disabled = false;
+        document.getElementById('run-icon').outerHTML = `<svg id="run-icon" width="11" height="11"
+          viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
+        document.getElementById('run-label').textContent = 'Screener';
+        // Ricarica i dati
+        await loadLatest();
+        await loadLastRunLabel();
+      }
+    } catch { /* rete momentaneamente irraggiungibile */ }
+  }, 2000);
+}
+
 function updateNavStats() {
   const d = allData;
   document.getElementById('nav-total').textContent = `${d.length} titoli`;
