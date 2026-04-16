@@ -259,10 +259,11 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         # ── Info base (sempre da info — non presenti negli statements) ─────
         result["nome"]      = info.get("shortName") or info.get("longName") or ticker
         _sector = info.get("sector")
-        # quoteType ("EQUITY", "ETF", "INDEX", …) non è un settore economico:
-        # usalo solo se sector è assente *e* quoteType non è "EQUITY" (default per tutte le azioni).
-        _qtype  = info.get("quoteType", "")
-        result["settore"] = _sector or (_qtype if _qtype and _qtype.upper() != "EQUITY" else "N/D")
+        # quoteType non è un settore economico: usalo solo se sector è assente
+        # e solo per tipi strumentali noti (ETF, INDEX, MUTUALFUND, CURRENCY, FUTURE).
+        _VALID_QTYPES = {"ETF", "INDEX", "MUTUALFUND", "CURRENCY", "FUTURE"}
+        _qtype  = (info.get("quoteType") or "").upper()
+        result["settore"] = _sector or (_qtype if _qtype in _VALID_QTYPES else "N/D")
         result["industria"] = info.get("industry")  or "N/D"
         result["mktcap"]    = info.get("marketCap")
         result["valuta"]    = info.get("currency")  or "EUR"
@@ -780,25 +781,22 @@ def run_screener(
     total   = len(tickers)
     results: dict[str, dict] = {}
 
-    # ── Fase 1: fetch parallelo ────────────────────────────────────────────
-    _print_status(f"Recupero dati  0/{total}")
+    # ── Fase 1: fetch sequenziale ───────────────────────────────────────────
+    # Fetch sequenziale per evitare risposte incomplete da Yahoo Finance
+    # sotto carico parallelo (sector/industry mancanti).
     done = 0
     fetch_log: list[tuple] = []   # (ticker, row, elapsed, error)
 
-    with ThreadPoolExecutor(max_workers=min(total, workers)) as exe:
-        futures = {exe.submit(_fetch_and_score, t, benchmark_override): t for t in tickers}
-        for future in as_completed(futures):
-            ticker = futures[future]
-            try:
-                _, row, elapsed = future.result()
-                results[ticker] = row
-                done += 1
-                fetch_log.append((ticker, row, elapsed, None))
-            except Exception as exc:
-                done += 1
-                results[ticker] = {"ticker": ticker, "_errore": str(exc)}
-                fetch_log.append((ticker, {"ticker": ticker, "_errore": str(exc)}, 0.0, str(exc)))
-            _print_status(f"Recupero dati  {done}/{total}")
+    for ticker in tickers:
+        _print_status(f"Recupero dati  {done}/{total}  {ticker}")
+        try:
+            _, row, elapsed = _fetch_and_score(ticker, benchmark_override)
+            results[ticker] = row
+            fetch_log.append((ticker, row, elapsed, None))
+        except Exception as exc:
+            results[ticker] = {"ticker": ticker, "_errore": str(exc)}
+            fetch_log.append((ticker, {"ticker": ticker, "_errore": str(exc)}, 0.0, str(exc)))
+        done += 1
 
     _clear_line()
 
@@ -833,10 +831,12 @@ def run_screener(
             )
             score_str = f"{sf:.1f}" if sf is not None else "N/D"
             elapsed = elapsed_map.get(r["ticker"], 0.0)
+            settore = r.get('settore') or 'N/D'
             print(
                 f"  {Fore.CYAN}●{Style.RESET_ALL}  "
                 f"{Fore.WHITE}{r['ticker']:<12}{Style.RESET_ALL}"
                 f"{Style.DIM}{r.get('nome',''):<{nome_col}}{Style.RESET_ALL}"
+                f"{Style.DIM}{settore:<26}{Style.RESET_ALL}"
                 f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
                 f"{cls_color}{cls:<4}{Style.RESET_ALL}"
                 f"  {Style.DIM}({elapsed:.1f}s){Style.RESET_ALL}"
@@ -897,10 +897,12 @@ def _print_results_summary(results: list[dict]) -> None:
             Fore.WHITE
         )
         score_str = f"{sf:.1f}" if sf is not None else "N/D"
+        settore = r.get('settore') or 'N/D'
         print(
             f"  {Fore.CYAN}●{Style.RESET_ALL}  "
             f"{Fore.WHITE}{(r.get('ticker') or ''):<12}{Style.RESET_ALL}"
             f"{Style.DIM}{(r.get('nome') or ''):<{nome_col}}{Style.RESET_ALL}"
+            f"{Style.DIM}{settore:<26}{Style.RESET_ALL}"
             f"Score: {cls_color}{Style.BRIGHT}{score_str:<5}{Style.RESET_ALL}  "
             f"{cls_color}{cls:<4}{Style.RESET_ALL}"
         )
