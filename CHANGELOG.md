@@ -5,6 +5,55 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [3.3.0] — 2026-04-17
+
+### Added
+- **WACC** — Weighted Average Cost of Capital calculated per ticker and stored in DB + API + UI
+  - `Re = Rf + β × ERP` (CAPM; ERP = 5.5% Damodaran EUR)
+  - `Rd = abs(TTM Interest Expense) / Total Debt`, clamped 0.5%–20%
+  - `WACC = (E/V)×Re + (D/V)×Rd×(1−T)`; debt-free case: WACC = Re
+  - `_INT_EXP_KEYS` tuple: `"Interest Expense"`, `"Interest Expense Non Operating"`, `"Net Interest Income"`
+  - 5-level interest expense fallback chain (see below)
+- **ECB risk-free rate** — `_fetch_rf_rate()` fetches the ECB AAA sovereign EUR 8Y spot rate from the ECB SDW API (`data-api.ecb.europa.eu`); result cached 24 h in `_rf_cache`; clamped 0.5%–12%; fallback to last known value on error
+- **WACC interest expense fallback chain**:
+  1. Quarterly income stmt TTM (`_INT_EXP_KEYS`)
+  2. `info["interestExpense"]` from Yahoo info dict
+  3. `"Interest Paid Supplemental Data"` from quarterly cashflow (Salesforce / US GAAP companies that omit the I/S row)
+  4. Annual income stmt (`_INT_EXP_KEYS`, n=1) — covers AAPL which does not report quarterly
+  5. Annual cashflow `"Interest Paid Supplemental Data"` (annual fallback)
+- **PEG manual fallback** — when Yahoo's `pegRatio` / `trailingPegRatio` are both `None`, computes `PEG = trailingPE / (earningsGrowth × 100)` (e.g. European tickers like IVG.MI)
+- **ROIC** — `NOPAT / Invested Capital × 100`; `NOPAT = TTM EBIT × (1 − effective_tax_rate)`, `IC = Equity + Debt − Cash`
+- **Effective tax rate** — derived from TTM (`Tax Provision / Pretax Income`), clamped 10%–40%; fallback to 24% (IRES proxy) when data unavailable
+- **ROA** in Financial Services quality pillar — replaces `ebitda_margin` (structurally undefined for banks); thresholds: good ≥ 1.0%, bad ≤ 0.4%
+- **`wacc` column** in `screener_results` DB schema (DDL + `ADD COLUMN IF NOT EXISTS` migration)
+- **`wacc`** added to both `/api/latest` and `/api/ticker/<ticker>` SELECTs in `app.py`
+- **WACC display** in Extra section of drawer in `app.js`
+- **ROA / EBITDA Margin conditional** in Quality drawer: Financial Services → ROA; all others → EBITDA Margin
+
+### Changed
+- **FCF Yield** — removed `ttm_fcf > 0` guard; FCF Yield is now stored and displayed even when negative (e.g. Snam −4.1%)
+- **P/FCF** — guard `ttm_fcf > 0` retained (negative P/FCF multiple has no valuation meaning)
+- **FCF Growth** — added annual cashflow fallback (Path 2) for companies without quarterly cashflow (e.g. DBK.DE); uses `_mrq_nth` at index 1 to retrieve the prior-year annual figure
+- **`_CAPEX_KEYS`** — expanded with `"Investments In Property Plant And Equipment"`, `"Capital Expenditure Reported"`, `"Net PPE Purchase And Sale"` to cover EU and IFRS reporting variants
+- **Utilities `fcf_yield` threshold** — `bad` changed from `1.5` → `−5` to allow graduated scoring for companies with structurally negative FCF (capital-intensive infrastructure)
+- **`_VQM_WEIGHTS`** — Value 30 % → 25 %, Quality 40 % → 50 %, Momentum 30 % → 25 % (calibrated for semi-annual review strategy)
+
+---
+
+## [3.2.0] — 2026-04-14
+
+### Added
+- **New sectors in `thresholds.json`**: Consumer Cyclical, Consumer Defensive, Industrials, Communication Services, Basic Materials — each with fully calibrated value / quality / momentum thresholds
+- **`fcf_yield`** as Value metric for all non-Financial-Services sectors (replaces `p_book` which moved to Extra)
+- **`roic`** in Quality pillar across all sectors
+- **`fcf_growth`** in Momentum pillar across all sectors
+- **Quick-metric chips** in card header — `.qm-strip` / `.qm-lbl` / `.qm-val` CSS classes added to `index.html`
+
+### Changed
+- Default ticker list in `thresholds.json` expanded to ~110 tickers covering FTSE MIB, DAX, CAC 40, IBEX, SMI, AEX, Euronext Lisbon + main US large-caps
+
+---
+
 ## [3.1.0] — 2026-04-14
 
 ### Added
