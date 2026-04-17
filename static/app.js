@@ -549,6 +549,18 @@ function sectorCardHTML(name, items) {
   const nSell  = items.filter(r => r.classificazione === 'SELL').length;
 
   const isFS   = name === 'Financial Services';
+  const sid    = 'sc-' + esc(name).replace(/\s+/g, '-').replace(/[^a-zA-Z0-9-]/g, '');
+
+  const sectionHead = (label, color, id) => `
+  <div class="sc-toggle flex items-center justify-between pt-3"
+       onclick="toggleSectorSection('${id}')">
+    <div class="s-head flex-1 mr-2" style="color:${color}"><span>${label}</span></div>
+    <svg class="sc-chevron shrink-0" id="${id}-chev" width="13" height="13" viewBox="0 0 24 24"
+         fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M6 9l6 6 6-6"/>
+    </svg>
+  </div>
+  <div class="sc-body" id="${id}-body">`;
 
   return `
 <div class="sector-card p-5">
@@ -577,41 +589,52 @@ function sectorCardHTML(name, items) {
   </div>
 
   <!-- Distribution pills -->
-  <div class="flex items-center gap-1.5 mb-4 flex-wrap">
+  <div class="flex items-center gap-1.5 flex-wrap">
     ${nBuy  ? `<span class="pill-buy  px-2.5 py-0.5 rounded-full text-[11px] font-bold">BUY ${nBuy}</span>`   : ''}
     ${nHold ? `<span class="pill-hold px-2.5 py-0.5 rounded-full text-[11px] font-bold">HOLD ${nHold}</span>` : ''}
     ${nSell ? `<span class="pill-sell px-2.5 py-0.5 rounded-full text-[11px] font-bold">SELL ${nSell}</span>` : ''}
   </div>
 
-  <!-- Value -->
-  <div class="s-head mb-2" style="color:#3b82f6"><span>Value</span></div>
-  <div class="grid grid-cols-2 gap-1.5 mb-3">
-    ${smTile('EV/EBITDA', avgField(items,'ev_ebitda'), 'x')}
-    ${smTile('P/FCF',     avgField(items,'p_fcf'),     'x')}
-    ${smTile('P/E',       avgField(items,'pe'),        'x')}
-    ${isFS ? smTile('P/Book',   avgField(items,'p_book'),   'x')
-           : smTile('FCF Yield',avgField(items,'fcf_yield'),'%')}
+  <!-- Value (collapsible) -->
+  ${sectionHead('Value', '#3b82f6', sid + '-v')}
+    <div class="grid grid-cols-2 gap-1.5 pt-2 pb-1">
+      ${smTile('EV/EBITDA', avgField(items,'ev_ebitda'), 'x')}
+      ${smTile('P/FCF',     avgField(items,'p_fcf'),     'x')}
+      ${smTile('P/E',       avgField(items,'pe'),        'x')}
+      ${isFS ? smTile('P/Book',   avgField(items,'p_book'),   'x')
+             : smTile('FCF Yield',avgField(items,'fcf_yield'),'%')}
+    </div>
   </div>
 
-  <!-- Quality -->
-  <div class="s-head mb-2" style="color:#a855f7"><span>Quality</span></div>
-  <div class="grid grid-cols-2 gap-1.5 mb-3">
-    ${smTile('ROE',      avgField(items,'roe'),        '%')}
-    ${isFS ? smTile('ROA',        avgField(items,'roa'),           '%')
-           : smTile('EBITDA Mgn', avgField(items,'ebitda_margin'), '%')}
-    ${smTile('ROIC',     avgField(items,'roic'),       '%')}
-    ${smTile('D/E',      avgField(items,'de_ratio'),   'x')}
-    ${smTile('EPS CAGR', avgField(items,'eps_cagr_4y') ?? avgField(items,'eps_cagr_5y'), '%')}
+  <!-- Quality (collapsible) -->
+  ${sectionHead('Quality', '#a855f7', sid + '-q')}
+    <div class="grid grid-cols-2 gap-1.5 pt-2 pb-1">
+      ${smTile('ROE',      avgField(items,'roe'),        '%')}
+      ${isFS ? smTile('ROA',        avgField(items,'roa'),           '%')
+             : smTile('EBITDA Mgn', avgField(items,'ebitda_margin'), '%')}
+      ${smTile('ROIC',     avgField(items,'roic'),       '%')}
+      ${smTile('D/E',      avgField(items,'de_ratio'),   'x')}
+      ${smTile('EPS CAGR', avgField(items,'eps_cagr_4y') ?? avgField(items,'eps_cagr_5y'), '%')}
+    </div>
   </div>
 
-  <!-- Momentum -->
-  <div class="s-head mb-2" style="color:#f97316"><span>Momentum</span></div>
-  <div class="grid grid-cols-2 gap-1.5">
-    ${smTile('Mom 12M–1M', avgField(items,'mom_12m1m'),  '%')}
-    ${smTile('EPS Rev',    avgField(items,'eps_rev'),    '%')}
-    ${smTile('FCF Growth', avgField(items,'fcf_growth'), '%')}
+  <!-- Momentum (collapsible) -->
+  ${sectionHead('Momentum', '#f97316', sid + '-m')}
+    <div class="grid grid-cols-2 gap-1.5 pt-2 pb-1">
+      ${smTile('Mom 12M–1M', avgField(items,'mom_12m1m'),  '%')}
+      ${smTile('EPS Rev',    avgField(items,'eps_rev'),    '%')}
+      ${smTile('FCF Growth', avgField(items,'fcf_growth'), '%')}
+    </div>
   </div>
 </div>`;
+}
+
+function toggleSectorSection(id) {
+  const body = document.getElementById(id + '-body');
+  const chev = document.getElementById(id + '-chev');
+  if (!body) return;
+  const isOpen = body.classList.toggle('open');
+  chev.classList.toggle('open', isOpen);
 }
 
 // ── Filter / sort / search ────────────────────────────────────────────────────

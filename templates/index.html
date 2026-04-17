@@ -138,6 +138,14 @@
     }
     .sector-card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,.75); border-color: rgba(255,255,255,.11); }
 
+    /* Collapsible section in sector card */
+    .sc-toggle { cursor:pointer; user-select:none; }
+    .sc-toggle:hover .sc-chevron { color:#d1d5db; }
+    .sc-chevron { transition: transform .2s ease; color:#3f3f52; }
+    .sc-chevron.open { transform: rotate(180deg); }
+    .sc-body { overflow: hidden; transition: max-height .25s ease, opacity .2s ease; max-height: 0; opacity: 0; }
+    .sc-body.open { max-height: 300px; opacity: 1; }
+
     /* Run button – loading state */
     #run-btn[disabled] { opacity:.5; pointer-events:none; }
 
