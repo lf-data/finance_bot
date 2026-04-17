@@ -19,6 +19,13 @@ let portfolio    = new Map(Object.entries(JSON.parse(localStorage.getItem('vqm_p
     } catch {}
   }
 })();
+
+// etfPortfolio: Map<ticker, {shares, name, price, currency}>
+let etfPortfolio = new Map(Object.entries(
+  JSON.parse(localStorage.getItem('vqm_etf_v1') || '{}')
+));
+let _etfModalTicker = null; // null = nuovo, altrimenti modifica
+
 let portfolioChart      = null;
 let _sharesModalTicker  = null;
 let thresholds   = {};   // {settore: {metrica: {good, bad, lower_is_better}}}
@@ -45,6 +52,16 @@ document.addEventListener('DOMContentLoaded', () => {
     if (e.key === 'Enter')  confirmSharesModal();
     if (e.key === 'Escape') cancelSharesModal();
   });
+  
+  // ETF Modal keyboard support
+  const etfModalHandler = e => {
+    if (e.key === 'Enter' && e.target.id === 'etf-shares-input') confirmEtfModal();
+    if (e.key === 'Escape') cancelEtfModal();
+  };
+  ['etf-ticker-input', 'etf-name-input', 'etf-shares-input', 'etf-price-input', 'etf-currency-input'].forEach(id => {
+    document.getElementById(id)?.addEventListener('keydown', etfModalHandler);
+  });
+
   // Se lo screener era già in corso prima del refresh, riattacca il polling
   fetch('/api/run-screener/status').then(r => r.json()).then(({ running }) => {
     if (running) {
@@ -700,6 +717,62 @@ function savePortfolio() {
   localStorage.setItem('vqm_portfolio_v2', JSON.stringify(Object.fromEntries(portfolio)));
 }
 
+function saveEtfPortfolio() {
+  localStorage.setItem('vqm_etf_v1', JSON.stringify(Object.fromEntries(etfPortfolio)));
+}
+
+function openAddEtfModal(ticker) {
+  _etfModalTicker = ticker || null;
+  const existing = ticker ? etfPortfolio.get(ticker) : null;
+  document.getElementById('etf-ticker-input').value   = ticker || '';
+  document.getElementById('etf-ticker-input').disabled = !!ticker;
+  document.getElementById('etf-name-input').value     = existing?.name     || '';
+  document.getElementById('etf-shares-input').value   = existing?.shares   || 1;
+  document.getElementById('etf-price-input').value    = existing?.price    || '';
+  document.getElementById('etf-currency-input').value = existing?.currency || 'EUR';
+  document.getElementById('etf-modal').classList.remove('hidden');
+  setTimeout(() => {
+    const f = ticker ? document.getElementById('etf-name-input') : document.getElementById('etf-ticker-input');
+    f.focus();
+  }, 50);
+}
+
+function cancelEtfModal() {
+  _etfModalTicker = null;
+  document.getElementById('etf-modal').classList.add('hidden');
+}
+
+function confirmEtfModal() {
+  const rawTicker = document.getElementById('etf-ticker-input').value.trim().toUpperCase();
+  if (!rawTicker) { document.getElementById('etf-ticker-input').focus(); return; }
+  const shares   = Math.max(1, parseInt(document.getElementById('etf-shares-input').value, 10) || 1);
+  const name     = document.getElementById('etf-name-input').value.trim() || '';
+  const priceRaw = parseFloat(document.getElementById('etf-price-input').value);
+  const price    = isNaN(priceRaw) || priceRaw <= 0 ? null : priceRaw;
+  const currency = (document.getElementById('etf-currency-input').value.trim().toUpperCase() || 'EUR');
+  etfPortfolio.set(rawTicker, { shares, name, price, currency });
+  saveEtfPortfolio();
+  updatePortfolioBadge();
+  document.getElementById('etf-modal').classList.add('hidden');
+  _etfModalTicker = null;
+  const panel = document.getElementById('portfolio-panel');
+  if (panel && !panel.classList.contains('translate-y-full')) renderPortfolioPanel();
+}
+
+function editEtf(ticker, event) {
+  event.stopPropagation();
+  openAddEtfModal(ticker);
+}
+
+function removeFromEtfPortfolio(ticker, event) {
+  event.stopPropagation();
+  etfPortfolio.delete(ticker);
+  saveEtfPortfolio();
+  updatePortfolioBadge();
+  if (!portfolio.size && !etfPortfolio.size) { closePortfolio(); return; }
+  renderPortfolioPanel();
+}
+
 function togglePortfolio(btnEl, event) {
   event.stopPropagation();
   const ticker = btnEl.dataset.ticker;
@@ -762,7 +835,7 @@ function editShares(ticker, event) {
 }
 
 function updatePortfolioBadge() {
-  const n     = portfolio.size;
+  const n     = portfolio.size + etfPortfolio.size;
   const badge = document.getElementById('portfolio-badge');
   const btn   = document.getElementById('portfolio-nav-btn');
   if (!badge || !btn) return;
@@ -779,8 +852,9 @@ function updatePortfolioBadge() {
 }
 
 function clearPortfolio() {
-  if (!confirm(`Rimuovere tutti i ${portfolio.size} titoli dal portafoglio?`)) return;
+  if (!confirm(`Rimuovere tutti i ${portfolio.size + etfPortfolio.size} titoli dal portafoglio?`)) return;
   portfolio.clear();
+  etfPortfolio.clear(); saveEtfPortfolio();
   savePortfolio();
   updatePortfolioBadge();
   renderCards();
@@ -788,7 +862,7 @@ function clearPortfolio() {
 }
 
 function openPortfolio() {
-  if (!portfolio.size) return;
+  if (!portfolio.size && !etfPortfolio.size) return;
   renderPortfolioPanel();
   document.getElementById('portfolio-overlay').classList.remove('hidden');
   document.getElementById('portfolio-panel').classList.remove('translate-y-full');
@@ -813,20 +887,13 @@ function removeFromPortfolio(ticker, event) {
   savePortfolio();
   updatePortfolioBadge();
   _updatePortfolioBtnState(ticker, false);
-  if (!portfolio.size) { closePortfolio(); return; }
+  if (!portfolio.size && !etfPortfolio.size) { closePortfolio(); return; }
   renderPortfolioPanel();
 }
 
 function renderPortfolioPanel() {
   const items = allData.filter(r => portfolio.has(r.ticker));
   const n     = items.length;
-  document.getElementById('port-count').textContent = `${n} titol${n === 1 ? 'o' : 'i'} selezionati`;
-
-  if (!n) {
-    document.getElementById('portfolio-body').innerHTML =
-      '<p class="text-gray-600 text-center text-sm py-12">Nessun titolo nel portafoglio.</p>';
-    return;
-  }
 
   // Arricchisci ogni posizione con shares e valore in EUR
   const toEur = (amount, currency) => {
@@ -843,8 +910,25 @@ function renderPortfolioPanel() {
     return { ...r, shares, posVal, posValNom, rateUsed };
   });
 
-  const hasValues  = positions.some(p => p.posVal != null);
-  const totalValue = hasValues ? positions.reduce((s, p) => s + (p.posVal ?? 0), 0) : null;
+  // Posizioni ETF (strumenti non screener)
+  const etfItems = Array.from(etfPortfolio.entries()).map(([ticker, d]) => ({
+    ticker,
+    name:     d.name,
+    shares:   d.shares,
+    price:    d.price,
+    currency: d.currency || 'EUR',
+  })).map(d => {
+    const posValNom = d.price != null ? d.shares * d.price : null;
+    const rate      = fxRates[(d.currency || 'EUR').toUpperCase()] ?? null;
+    const posVal    = posValNom != null && rate != null ? posValNom * rate : posValNom;
+    return { ...d, posValNom, posVal, rateUsed: rate };
+  });
+
+  const hasValues  = positions.some(p => p.posVal != null) || etfItems.some(p => p.posVal != null);
+  const totalValue = hasValues
+    ? positions.reduce((s, p) => s + (p.posVal ?? 0), 0)
+      + etfItems.reduce((s, p) => s + (p.posVal ?? 0), 0)
+    : null;
 
   // Peso: per valore € se disponibile, altrimenti equi-pesato
   const getW = p => {
@@ -872,6 +956,117 @@ function renderPortfolioPanel() {
   const avgScore  = wavg('score_finale');
   const avgOffset = avgScore != null ? 251.2 - (251.2 * avgScore / 10) : 251.2;
   const avgCol    = avgScore != null ? (avgScore >= 7.5 ? '#00d084' : avgScore >= 5 ? '#fbbf24' : '#f87171') : '#52525e';
+
+  const nEtf = etfItems.length;
+  const totalN = n + nEtf;
+
+  if (totalN) {
+    document.getElementById('port-count').textContent =
+      `${totalN} strument${totalN === 1 ? 'o' : 'i'}` +
+      (nEtf > 0 ? ` (${n} titoli · ${nEtf} ETF/ETC)` : ` selezionati`);
+  } else {
+    document.getElementById('port-count').textContent = '0 strumenti selezionati';
+    document.getElementById('portfolio-body').innerHTML =
+      '<p class="text-gray-600 text-center text-sm py-12">Nessun titolo o ETF nel portafoglio.</p>';
+    return;
+  }
+
+  // Pre-compute row HTML to avoid invalid triple-nesting of template literals
+  const sortedHtml = sorted.map(p => {
+    const col    = clsColor(p.classificazione ?? 'N/D');
+    const wPct   = hasValues && totalValue > 0 && p.posVal != null
+                   ? (p.posVal / totalValue * 100).toFixed(1) + '%'
+                   : (100 / n).toFixed(1) + '%';
+    const valStr = (() => {
+      if (p.posValNom == null) return '—';
+      const origCur = (p.valuta || 'EUR').toUpperCase();
+      const orig    = fmtNum(p.posValNom, 0) + '\u00a0' + origCur;
+      if (origCur === 'EUR' || p.posVal == null || p.rateUsed == null) return orig;
+      return orig + ' ≈ ' + fmtNum(p.posVal, 0) + '\u00a0EUR';
+    })();
+    const barW   = Math.max(3, Math.min(60, parseFloat(wPct) * 1.5));
+    const priceHtml = p.prezzo != null
+      ? '<span class="text-[11px] text-gray-700">@ ' + fmtNum(p.prezzo, 2) + '</span>'
+      : '';
+    return `
+        <div class="rounded-xl overflow-hidden cursor-pointer transition-all"
+             style="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05)"
+             onclick="portTickerClick(this)" data-ticker="${esc(p.ticker)}"
+             onmouseenter="this.style.background='rgba(255,255,255,.04)'"
+             onmouseleave="this.style.background='rgba(255,255,255,.025)'">
+          <div class="flex items-center gap-2.5 px-3.5 pt-2.5 pb-1">
+            <div class="w-2 h-2 rounded-full shrink-0" style="background:${col};box-shadow:0 0 5px ${col}88"></div>
+            <div class="flex-1 min-w-0">
+              <span class="font-bold text-[13px]">${esc(p.ticker)}</span>
+              <span class="ml-1.5 text-[11px] text-gray-600">${esc(p.nome ?? '')}</span>
+            </div>
+            <span class="text-[13px] font-black tabular-nums" style="color:${col}">${fmt1(p.score_finale)}</span>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${pillClass(p.classificazione ?? 'N/D')}">${p.classificazione ?? 'N/D'}</span>
+            <button data-ticker="${esc(p.ticker)}" onclick="editShares(this.dataset.ticker,event)"
+              class="text-gray-600 hover:text-accent transition text-[13px] leading-none shrink-0" title="Modifica quantit\u00e0">&#x270E;</button>
+            <button data-ticker="${esc(p.ticker)}" onclick="removeFromPortfolio(this.dataset.ticker,event)"
+              class="text-gray-700 hover:text-red-400 transition text-[16px] leading-none shrink-0">&times;</button>
+          </div>
+          <div class="flex items-center gap-2.5 px-3.5 pb-2" style="padding-left:2.3rem">
+            <span class="text-[11px] font-semibold text-gray-600">${p.shares}&#x202F;&times;</span>
+            ${priceHtml}
+            <span class="text-[11px] font-semibold text-gray-400">${valStr}</span>
+            <div class="ml-auto flex items-center gap-1.5">
+              <div class="h-1.5 rounded-full" style="width:${barW}px;background:${col}77"></div>
+              <span class="text-[11px] font-bold tabular-nums" style="color:${col}cc">${wPct}</span>
+            </div>
+          </div>
+        </div>`;
+  }).join('');
+
+  const etfHtml = etfItems.map(p => {
+    const valStr = (() => {
+      if (p.posValNom == null) return '—';
+      const origCur = (p.currency || 'EUR').toUpperCase();
+      const orig    = fmtNum(p.posValNom, 0) + '\u00a0' + origCur;
+      if (origCur === 'EUR' || p.posVal == null || p.rateUsed == null) return orig;
+      return orig + ' ≈ ' + fmtNum(p.posVal, 0) + '\u00a0EUR';
+    })();
+    const wPct = hasValues && totalValue > 0 && p.posVal != null
+      ? (p.posVal / totalValue * 100).toFixed(1) + '%'
+      : (100 / (n + nEtf)).toFixed(1) + '%';
+    const barW = Math.max(3, Math.min(60, parseFloat(wPct) * 1.5));
+    const etfColor = '#60a5fa';
+    const nameHtml = p.name
+      ? '<span class="ml-1.5 text-[11px] text-gray-600">' + esc(p.name) + '</span>'
+      : '';
+    const etfPriceHtml = p.price != null
+      ? '<span class="text-[11px] text-gray-700">@ ' + fmtNum(p.price, 2) + '</span>'
+      : '';
+    return `
+        <div class="rounded-xl overflow-hidden"
+             style="background:rgba(255,255,255,.025);border:1px solid rgba(96,165,250,.12)">
+          <div class="flex items-center gap-2.5 px-3.5 pt-2.5 pb-1">
+            <div class="w-2 h-2 rounded-full shrink-0" style="background:${etfColor};box-shadow:0 0 5px ${etfColor}88"></div>
+            <div class="flex-1 min-w-0">
+              <span class="font-bold text-[13px]">${esc(p.ticker)}</span>
+              ${nameHtml}
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                  style="background:rgba(96,165,250,.12);color:#60a5fa;border:1px solid rgba(96,165,250,.25)">ETF</span>
+            <button data-ticker="${esc(p.ticker)}" onclick="editEtf(this.dataset.ticker,event)"
+              class="text-gray-600 hover:text-accent transition text-[13px] leading-none shrink-0" title="Modifica">&#x270E;</button>
+            <button data-ticker="${esc(p.ticker)}" onclick="removeFromEtfPortfolio(this.dataset.ticker,event)"
+              class="text-gray-700 hover:text-red-400 transition text-[16px] leading-none shrink-0">&times;</button>
+          </div>
+          <div class="flex items-center gap-2.5 px-3.5 pb-2" style="padding-left:2.3rem">
+            <span class="text-[11px] font-semibold text-gray-600">${p.shares}&#x202F;&times;</span>
+            ${etfPriceHtml}
+            <span class="text-[11px] font-semibold text-gray-400">${valStr}</span>
+            <div class="ml-auto flex items-center gap-1.5">
+              <div class="h-1.5 rounded-full" style="width:${barW}px;background:${etfColor}77"></div>
+              <span class="text-[11px] font-bold tabular-nums" style="color:${etfColor}cc">${wPct}</span>
+            </div>
+          </div>
+        </div>`;
+  }).join('');
+
+  const stockSectionHead = nEtf > 0 ? `Titoli screener (${n})` : `Titoli (${n})`;
 
   document.getElementById('portfolio-body').innerHTML = `
     <!-- Signal sheet + avg score -->
@@ -928,54 +1123,19 @@ function renderPortfolioPanel() {
     </div>
 
     <!-- Ticker list con shares, valore e peso -->
-    <div>
-      <div class="s-head text-gray-600 mb-3">Titoli (${n})</div>
-      <div class="space-y-1.5">
-        ${sorted.map(p => {
-          const col    = clsColor(p.classificazione ?? 'N/D');
-          const wPct   = hasValues && totalValue > 0 && p.posVal != null
-                         ? (p.posVal / totalValue * 100).toFixed(1) + '%'
-                         : (100 / n).toFixed(1) + '%';
-          const valStr = (() => {
-            if (p.posValNom == null) return '—';
-            const origCur = (p.valuta || 'EUR').toUpperCase();
-            const orig    = fmtNum(p.posValNom, 0) + '\u00a0' + origCur;
-            if (origCur === 'EUR' || p.posVal == null || p.rateUsed == null) return orig;
-            return orig + ' ≈ ' + fmtNum(p.posVal, 0) + '\u00a0EUR';
-          })();
-          const barW   = Math.max(3, Math.min(60, parseFloat(wPct) * 1.5));
-          return `
-          <div class="rounded-xl overflow-hidden cursor-pointer transition-all"
-               style="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05)"
-               onclick="portTickerClick(this)" data-ticker="${esc(p.ticker)}"
-               onmouseenter="this.style.background='rgba(255,255,255,.04)'"
-               onmouseleave="this.style.background='rgba(255,255,255,.025)'">
-            <div class="flex items-center gap-2.5 px-3.5 pt-2.5 pb-1">
-              <div class="w-2 h-2 rounded-full shrink-0" style="background:${col};box-shadow:0 0 5px ${col}88"></div>
-              <div class="flex-1 min-w-0">
-                <span class="font-bold text-[13px]">${esc(p.ticker)}</span>
-                <span class="ml-1.5 text-[11px] text-gray-600">${esc(p.nome ?? '')}</span>
-              </div>
-              <span class="text-[13px] font-black tabular-nums" style="color:${col}">${fmt1(p.score_finale)}</span>
-              <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${pillClass(p.classificazione ?? 'N/D')}">${p.classificazione ?? 'N/D'}</span>
-              <button data-ticker="${esc(p.ticker)}" onclick="editShares(this.dataset.ticker,event)"
-                class="text-gray-600 hover:text-accent transition text-[13px] leading-none shrink-0" title="Modifica quantit\u00e0">&#x270E;</button>
-              <button data-ticker="${esc(p.ticker)}" onclick="removeFromPortfolio(this.dataset.ticker,event)"
-                class="text-gray-700 hover:text-red-400 transition text-[16px] leading-none shrink-0">&times;</button>
-            </div>
-            <div class="flex items-center gap-2.5 px-3.5 pb-2" style="padding-left:2.3rem">
-              <span class="text-[11px] font-semibold text-gray-600">${p.shares}&#x202F;&times;</span>
-              ${p.prezzo != null ? `<span class="text-[11px] text-gray-700">@ ${fmtNum(p.prezzo, 2)}</span>` : ''}
-              <span class="text-[11px] font-semibold text-gray-400">${valStr}</span>
-              <div class="ml-auto flex items-center gap-1.5">
-                <div class="h-1.5 rounded-full" style="width:${barW}px;background:${col}77"></div>
-                <span class="text-[11px] font-bold tabular-nums" style="color:${col}cc">${wPct}</span>
-              </div>
-            </div>
-          </div>`;
-        }).join('')}
+    ${n > 0 ? `<div>
+      <div class="s-head text-gray-600 mb-3">${stockSectionHead}</div>
+      <div class="space-y-1.5">${sortedHtml}</div>
+    </div>` : ''}
+
+    <!-- ETF / ETC section -->
+    ${nEtf > 0 ? `<div>
+      <div class="s-head text-gray-600 mb-3">
+        ETF / ETC (${nEtf})
+        <span class="text-[10px] font-medium text-gray-700 normal-case tracking-normal">\u00b7 non inclusi nei punteggi</span>
       </div>
-    </div>
+      <div class="space-y-1.5">${etfHtml}</div>
+    </div>` : ''}
 
     <!-- Metriche pesate per valore -->
     <div>
@@ -995,7 +1155,7 @@ function renderPortfolioPanel() {
     </div>
   `;
 
-  _renderPortfolioPie(sorted, hasValues, totalValue);
+  _renderPortfolioPie(sorted, etfItems, hasValues, totalValue);
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1094,18 +1254,26 @@ function mValThr(label, value, unit, metricKey, sector) {
 }
 
 // ── Portfolio Pie Chart ──────────────────────────────────────────────────────
-function _renderPortfolioPie(sorted, hasValues, totalValue) {
+function _renderPortfolioPie(sorted, etfItems, hasValues, totalValue) {
   const canvas = document.getElementById('portfolio-pie');
   if (!canvas) return;
   if (portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
 
-  const labels = sorted.map(p => p.ticker);
-  const data   = sorted.map(p => {
+  const labels = sorted.map(p => p.ticker).concat(etfItems.map(p => p.ticker));
+  
+  const data = sorted.map(p => {
     if (hasValues && totalValue > 0)
       return p.posVal != null ? +((p.posVal / totalValue) * 100).toFixed(2) : 0;
-    return +(100 / sorted.length).toFixed(2);
-  });
-  const colors = _pieColors(sorted.length);
+    return +(100 / (sorted.length + etfItems.length)).toFixed(2);
+  }).concat(etfItems.map(p => {
+    if (hasValues && totalValue > 0)
+      return p.posVal != null ? +((p.posVal / totalValue) * 100).toFixed(2) : 0;
+    return +(100 / (sorted.length + etfItems.length)).toFixed(2);
+  }));
+
+  const stockColors = _pieColors(sorted.length);
+  const etfColors   = etfItems.map(() => '#60a5fa');
+  const colors      = stockColors.concat(etfColors);
 
   portfolioChart = new Chart(canvas, {
     type: 'doughnut',
