@@ -541,9 +541,9 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         upside_consensus = None
         try:
             apt = t.analyst_price_targets
-            n_analysts = apt.get("numberOfAnalysts", 0) if isinstance(apt, dict) else 0
             mean_target = apt.get("mean") if isinstance(apt, dict) else None
             price = info.get("currentPrice") or info.get("regularMarketPrice")
+            n_analysts = info.get("numberOfAnalystOpinions") or 0
             if n_analysts >= 3 and mean_target and price and price > 0:
                 raw = (mean_target / price - 1) * 100
                 # Clamp ±80%: oltre questa soglia il target è solitamente stale
