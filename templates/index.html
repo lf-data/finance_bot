@@ -113,6 +113,31 @@
     .spin { animation: spin .7s linear infinite; }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* View toggle */
+    .view-btn {
+      padding: .38rem 1.1rem; border-radius:999px; font-size:.78rem; font-weight:700;
+      letter-spacing:.02em; transition:all .15s ease; border:1px solid transparent;
+      color:#52525e; background:transparent; cursor:pointer;
+    }
+    .view-btn:hover { color:#e5e7eb; background:rgba(255,255,255,.06); }
+    .view-btn.view-active { background:rgba(255,255,255,.07); color:#e5e7eb; border-color:rgba(255,255,255,.12); }
+
+    /* Sector card */
+    .sector-card {
+      background: linear-gradient(160deg, #161621 0%, #101018 100%);
+      border: 1px solid rgba(255,255,255,.055);
+      border-radius: 20px;
+      transition: transform .2s ease, box-shadow .2s ease, border-color .2s ease;
+      position: relative; overflow: hidden;
+    }
+    .sector-card::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: radial-gradient(ellipse at top right, rgba(0,208,132,.04) 0%, transparent 60%);
+      pointer-events: none;
+    }
+    .sector-card:hover { transform: translateY(-4px); box-shadow: 0 16px 48px rgba(0,0,0,.75); border-color: rgba(255,255,255,.11); }
+
     /* Run button – loading state */
     #run-btn[disabled] { opacity:.5; pointer-events:none; }
 
@@ -196,16 +221,6 @@
         <span id="run-label" class="hidden sm:inline">Screener</span>
       </button>
 
-      <!-- PWA Install button – shown only when browser fires beforeinstallprompt -->
-      <button id="pwa-install-btn" onclick="pwaInstall()"
-        class="hidden items-center justify-center w-9 h-9 sm:w-auto sm:h-auto sm:px-3.5 sm:py-2
-               rounded-full border border-accent/40 text-accent transition-all duration-200
-               hover:bg-accent/10 touch-manipulation shrink-0">
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 16L12 8M12 16l-3-3M12 16l3-3"/><rect x="3" y="17" width="18" height="4" rx="2"/>
-        </svg>
-        <span class="hidden sm:inline">Installa</span>
-      </button>
     </div>
   </div>
 </nav>
@@ -213,8 +228,14 @@
 <!-- ═══════════════════════════ MAIN ════════════════════════════════════════ -->
 <main class="max-w-screen-xl mx-auto px-5 py-7 space-y-6">
 
-  <!-- Toolbar -->
-  <div class="flex flex-wrap gap-3 items-center">
+  <!-- View toggle -->
+  <div class="flex gap-1 p-1 bg-white/[.025] border border-white/[.06] rounded-full w-fit">
+    <button data-view="titoli"  class="view-btn view-active">Titoli</button>
+    <button data-view="settori" class="view-btn">Settori</button>
+  </div>
+
+  <!-- Toolbar (nascosta in vista Settori) -->
+  <div id="toolbar" class="flex flex-wrap gap-3 items-center">
     <!-- Search -->
     <div class="relative flex-1 min-w-[200px]">
       <svg class="absolute left-3.5 top-1/2 -translate-y-1/2 text-gray-700 pointer-events-none"
@@ -235,6 +256,20 @@
       <button data-filter="SELL" class="filter-btn">SELL</button>
     </div>
 
+    <!-- Sector filter -->
+    <div class="relative">
+      <select id="sector-select"
+        class="appearance-none bg-white/[.03] border border-white/[.07] rounded-full pl-4 pr-8 py-2.5
+               text-xs font-semibold text-gray-500 focus:outline-none cursor-pointer hover:border-white/[.11]
+               focus:ring-2 focus:ring-green-500/30 transition">
+        <option value="">Tutti i settori</option>
+      </select>
+      <svg class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-700"
+           width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+        <path d="M6 9l6 6 6-6"/>
+      </svg>
+    </div>
+
     <!-- Sort -->
     <div class="relative">
       <select id="sort-select"
@@ -250,10 +285,25 @@
         <path d="M6 9l6 6 6-6"/>
       </svg>
     </div>
+
+    <!-- Reset filters -->
+    <button onclick="resetFilters()" title="Azzera filtri"
+      class="flex items-center gap-1.5 text-xs font-semibold px-3.5 py-2.5 rounded-full
+             border border-white/[.07] text-gray-500 transition-all duration-200
+             hover:text-gray-200 hover:border-white/[.14] hover:bg-white/[.05] active:scale-95 shrink-0">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+      </svg>
+      Reset
+    </button>
   </div>
 
   <!-- Cards grid -->
   <div id="cards-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+
+  <!-- Sectors grid (hidden by default) -->
+  <div id="sectors-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5"></div>
 
   <!-- Loading -->
   <div id="loading" class="flex flex-col items-center justify-center py-32 gap-5">

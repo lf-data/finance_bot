@@ -3,6 +3,8 @@
 // ── State ────────────────────────────────────────────────────────────────────
 let allData      = [];
 let activeFilter = 'ALL';
+let activeSector = '';
+let activeView   = 'titoli';
 let sortBy       = 'score';
 let historyChart = null;
 // portfolio: Map<ticker, shares>
@@ -32,6 +34,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initFilterBtns();
   initSort();
   initSearch();
+  initSectorFilter();
+  initViewToggle();
   loadLatest();
   loadLastRunLabel();
   loadThresholds();
@@ -64,7 +68,9 @@ async function loadLatest() {
       return;
     }
     updateNavStats();
+    populateSectorFilter();
     renderCards();
+    if (activeView === 'settori') renderSectorCards();
   } catch {
     document.getElementById('loading').innerHTML =
       '<p class="text-red-400/70 text-sm text-center py-32 font-medium">Errore nel caricamento dati.</p>';
@@ -173,7 +179,8 @@ function renderCards() {
   let data = allData.filter(r => {
     const matchF = activeFilter === 'ALL' || r.classificazione === activeFilter;
     const matchS = !q || (r.ticker || '').toLowerCase().includes(q) || (r.nome || '').toLowerCase().includes(q);
-    return matchF && matchS;
+    const matchSec = !activeSector || (r.settore ?? '') === activeSector;
+    return matchF && matchS && matchSec;
   });
 
   data.sort((a, b) => {
@@ -476,7 +483,169 @@ function renderHistoryChart(hist) {
   });
 }
 
+// ── View toggle ───────────────────────────────────────────────────────────────
+function initViewToggle() {
+  document.querySelectorAll('.view-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      activeView = btn.dataset.view;
+      document.querySelectorAll('.view-btn').forEach(b =>
+        b.classList.toggle('view-active', b.dataset.view === activeView));
+      const isTitoli = activeView === 'titoli';
+      document.getElementById('toolbar').classList.toggle('hidden', !isTitoli);
+      document.getElementById('cards-grid').classList.toggle('hidden', !isTitoli);
+      document.getElementById('sectors-grid').classList.toggle('hidden', isTitoli);
+      if (!isTitoli) renderSectorCards();
+    });
+  });
+}
+
+// ── Sector cards ──────────────────────────────────────────────────────────────
+function avgField(arr, key) {
+  const vals = arr.map(r => r[key]).filter(v => v != null && isFinite(Number(v)));
+  return vals.length ? vals.reduce((s, v) => s + Number(v), 0) / vals.length : null;
+}
+
+function smTile(label, value, unit) {
+  const txt = value != null ? fmtNum(value, 1) + '\u202f' + unit : '—';
+  return `<div class="m-tile">
+    <div class="lbl">${label}</div>
+    <div class="val${value == null ? ' dim' : ''}">${txt}</div>
+  </div>`;
+}
+
+function renderSectorCards() {
+  const grid = document.getElementById('sectors-grid');
+  if (!grid || !allData.length) return;
+
+  const map = new Map();
+  allData.forEach(r => {
+    const s = r.settore ?? 'N/D';
+    if (!map.has(s)) map.set(s, []);
+    map.get(s).push(r);
+  });
+
+  const sectors = [...map.entries()].sort((a, b) => {
+    const avgA = avgField(a[1], 'score_finale') ?? -1;
+    const avgB = avgField(b[1], 'score_finale') ?? -1;
+    return avgB - avgA;
+  });
+
+  grid.innerHTML = sectors.map(([name, items]) => sectorCardHTML(name, items)).join('');
+}
+
+function sectorCardHTML(name, items) {
+  const score  = avgField(items, 'score_finale');
+  const avgV   = avgField(items, 'score_value');
+  const avgQ   = avgField(items, 'score_quality');
+  const avgM   = avgField(items, 'score_momentum');
+
+  const pct    = score != null ? Math.round((score / 10) * 100) : 0;
+  const offset = 251.2 - (251.2 * pct / 100);
+  const cls    = score == null ? '' : score >= 6.5 ? 'BUY' : score >= 4.5 ? 'HOLD' : 'SELL';
+  const col    = clsColor(cls);
+
+  const nBuy   = items.filter(r => r.classificazione === 'BUY').length;
+  const nHold  = items.filter(r => r.classificazione === 'HOLD').length;
+  const nSell  = items.filter(r => r.classificazione === 'SELL').length;
+
+  const isFS   = name === 'Financial Services';
+
+  return `
+<div class="sector-card p-5">
+  <!-- Header -->
+  <div class="flex items-start justify-between mb-4">
+    <div class="flex-1 min-w-0 pr-3">
+      <div class="font-extrabold text-[15px] tracking-tight leading-tight">${esc(name)}</div>
+      <div class="text-[11px] text-gray-600 mt-0.5 font-medium">${items.length} titol${items.length === 1 ? 'o' : 'i'}</div>
+    </div>
+    <div class="relative w-[52px] h-[52px] shrink-0">
+      <svg class="w-full h-full -rotate-90" viewBox="0 0 88 88">
+        <circle cx="44" cy="44" r="40" fill="none" stroke="rgba(255,255,255,.05)" stroke-width="9"/>
+        <circle cx="44" cy="44" r="40" fill="none" stroke="${col}" stroke-width="9"
+          class="score-ring" style="stroke-dashoffset:${offset};filter:drop-shadow(0 0 4px ${col}66)"/>
+      </svg>
+      <span class="absolute inset-0 flex items-center justify-center text-[13px] font-black"
+            style="color:${col}">${score != null ? score.toFixed(1) : '—'}</span>
+    </div>
+  </div>
+
+  <!-- Pillar bars -->
+  <div class="space-y-1.5 mb-3.5">
+    ${miniPillar('V', avgV, '#3b82f6')}
+    ${miniPillar('Q', avgQ, '#a855f7')}
+    ${miniPillar('M', avgM, '#f97316')}
+  </div>
+
+  <!-- Distribution pills -->
+  <div class="flex items-center gap-1.5 mb-4 flex-wrap">
+    ${nBuy  ? `<span class="pill-buy  px-2.5 py-0.5 rounded-full text-[11px] font-bold">BUY ${nBuy}</span>`   : ''}
+    ${nHold ? `<span class="pill-hold px-2.5 py-0.5 rounded-full text-[11px] font-bold">HOLD ${nHold}</span>` : ''}
+    ${nSell ? `<span class="pill-sell px-2.5 py-0.5 rounded-full text-[11px] font-bold">SELL ${nSell}</span>` : ''}
+  </div>
+
+  <!-- Value -->
+  <div class="s-head mb-2" style="color:#3b82f6"><span>Value</span></div>
+  <div class="grid grid-cols-2 gap-1.5 mb-3">
+    ${smTile('EV/EBITDA', avgField(items,'ev_ebitda'), 'x')}
+    ${smTile('P/FCF',     avgField(items,'p_fcf'),     'x')}
+    ${smTile('P/E',       avgField(items,'pe'),        'x')}
+    ${isFS ? smTile('P/Book',   avgField(items,'p_book'),   'x')
+           : smTile('FCF Yield',avgField(items,'fcf_yield'),'%')}
+  </div>
+
+  <!-- Quality -->
+  <div class="s-head mb-2" style="color:#a855f7"><span>Quality</span></div>
+  <div class="grid grid-cols-2 gap-1.5 mb-3">
+    ${smTile('ROE',      avgField(items,'roe'),        '%')}
+    ${isFS ? smTile('ROA',        avgField(items,'roa'),           '%')
+           : smTile('EBITDA Mgn', avgField(items,'ebitda_margin'), '%')}
+    ${smTile('ROIC',     avgField(items,'roic'),       '%')}
+    ${smTile('D/E',      avgField(items,'de_ratio'),   'x')}
+    ${smTile('EPS CAGR', avgField(items,'eps_cagr_4y') ?? avgField(items,'eps_cagr_5y'), '%')}
+  </div>
+
+  <!-- Momentum -->
+  <div class="s-head mb-2" style="color:#f97316"><span>Momentum</span></div>
+  <div class="grid grid-cols-2 gap-1.5">
+    ${smTile('Mom 12M–1M', avgField(items,'mom_12m1m'),  '%')}
+    ${smTile('EPS Rev',    avgField(items,'eps_rev'),    '%')}
+    ${smTile('FCF Growth', avgField(items,'fcf_growth'), '%')}
+  </div>
+</div>`;
+}
+
 // ── Filter / sort / search ────────────────────────────────────────────────────
+function populateSectorFilter() {
+  const sel = document.getElementById('sector-select');
+  if (!sel) return;
+  const sectors = [...new Set(allData.map(r => r.settore).filter(Boolean))].sort();
+  const current = sel.value;
+  sel.innerHTML = '<option value="">Tutti i settori</option>' +
+    sectors.map(s => `<option value="${esc(s)}"${s === current ? ' selected' : ''}>${esc(s)}</option>`).join('');
+}
+
+function initSectorFilter() {
+  document.getElementById('sector-select')?.addEventListener('change', e => {
+    activeSector = e.target.value;
+    renderCards();
+  });
+}
+
+function resetFilters() {
+  document.getElementById('search-input').value = '';
+  activeFilter = 'ALL';
+  const btns = document.querySelectorAll('.filter-btn');
+  btns.forEach(b => b.className = 'filter-btn');
+  const allBtn = document.querySelector('[data-filter="ALL"]');
+  if (allBtn) allBtn.classList.add('f-active-ALL');
+  activeSector = '';
+  const sel = document.getElementById('sector-select');
+  if (sel) sel.value = '';
+  sortBy = 'score';
+  document.getElementById('sort-select').value = 'score';
+  renderCards();
+}
+
 function initFilterBtns() {
   const btns = document.querySelectorAll('.filter-btn');
   btns.forEach(btn => {
@@ -955,28 +1124,6 @@ function _pieColors(n) {
     colors.push(`hsl(${(i * 137.5) % 360},70%,55%)`);
   }
   return colors;
-}
-
-// ── PWA Install ───────────────────────────────────────────────────────────────
-let _pwaPrompt = null;
-
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault();
-  _pwaPrompt = e;
-  const btn = document.getElementById('pwa-install-btn');
-  if (btn) btn.classList.replace('hidden', 'flex');
-});
-
-window.addEventListener('appinstalled', () => {
-  _pwaPrompt = null;
-  const btn = document.getElementById('pwa-install-btn');
-  if (btn) btn.classList.replace('flex', 'hidden');
-});
-
-function pwaInstall() {
-  if (!_pwaPrompt) return;
-  _pwaPrompt.prompt();
-  _pwaPrompt.userChoice.then(() => { _pwaPrompt = null; });
 }
 
 // ── Service Worker registration ────────────────────────────────────────────────
