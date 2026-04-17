@@ -503,8 +503,14 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         # ROIC = NOPAT / Invested Capital × 100
         # NOPAT = TTM Operating Income × (1 − effective tax rate)
         # Invested Capital = Equity + Debt − Cash
-        if ttm_oi is not None and mrq_equity is not None:
-            _nopat = ttm_oi * (1 - effective_tax_rate)
+        # Fallback annuale: emittenti IFRS europei (es. STLAM.MI) possono
+        # restituire quarterly income stmt con sole righe Revenue; in tal caso
+        # ttm_oi è None e si ritenta con il dato annual (1 anno intero).
+        _oi_for_roic = ttm_oi
+        if _oi_for_roic is None and inc_q is not None and inc_a is not None:
+            _oi_for_roic = _ttm(_OI_KEYS, inc_a, 1)
+        if _oi_for_roic is not None and mrq_equity is not None:
+            _nopat = _oi_for_roic * (1 - effective_tax_rate)
             _invested_capital = (mrq_equity or 0) + (mrq_debt or 0) - (mrq_cash or 0)
             if _invested_capital > 0:
                 result["roic"] = round(_nopat / _invested_capital * 100, 2)
@@ -536,10 +542,14 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         eps_rev = None
         fwd = info.get("forwardEps")
         trl = info.get("trailingEps")
-        # Usare la ratio solo quando trl > 0: con trl negativo (turnaround)
-        # la formula inverte il segno e penalizza un miglioramento reale degli EPS.
-        if fwd and trl and trl > 0:
-            eps_rev = round((fwd / trl - 1) * 100, 2)
+        # Formula (fwd − trl) / |trl| × 100:
+        #   – trl > 0 (caso normale):  equivalente a fwd/trl − 1, stessa logica di prima
+        #   – trl < 0 e fwd > 0 (turnaround): risultato positivo, segnala correttamente
+        #     che gli analisti si aspettano un ritorno alla profittabilità
+        #   – trl < 0 e fwd < 0 (perdite crescenti): risultato negativo, corretto
+        # Guard: trl != 0 per evitare divisione per zero.
+        if fwd is not None and trl is not None and trl != 0:
+            eps_rev = round((fwd - trl) / abs(trl) * 100, 2)
         if eps_rev is None:
             for key in ("earningsQuarterlyGrowth", "earningsGrowth"):
                 v = info.get(key)
