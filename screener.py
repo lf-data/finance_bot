@@ -32,7 +32,6 @@ from config import (
     ANALYSIS_LANGUAGE,
     LLM_API_KEY,
     LLM_MODEL,
-    SCREENER_WORKERS,
     TAVILY_API_KEY,
 )
 
@@ -106,7 +105,7 @@ def _load_vqm_config() -> tuple[dict, dict, list]:
         with open(_THRESHOLDS_PATH, encoding="utf-8") as f:
             raw = json.load(f)
     except FileNotFoundError:
-        raise FileNotFoundError(f"thresholds.json non trovato in {_THRESHOLDS_PATH}")
+        raise FileNotFoundError(f"thresholds.json non trovato in {_THRESHOLDS_PATH}") from None
     except json.JSONDecodeError as exc:
         raise ValueError(f"thresholds.json malformato — {exc}") from exc
     pesi    = raw.get("pesi", {"value": 0.30, "quality": 0.40, "momentum": 0.30})
