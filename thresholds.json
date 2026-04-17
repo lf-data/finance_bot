@@ -10,9 +10,6 @@
     "AVIO.MI",
     "AZM.MI",
     "BMED.MI",
-    "BMPS.MI",
-    "BAMI.MI",
-    "BPE.MI",
     "BC.MI",
     "BZU.MI",
     "CPR.MI",
@@ -21,7 +18,6 @@
     "ENI.MI",
     "RACE.MI",
     "FCT.MI",
-    "FBK.MI",
     "G.MI",
     "HER.MI",
     "ISP.MI",
@@ -30,7 +26,6 @@
     "IVG.MI",
     "LDO.MI",
     "LTMC.MI",
-    "MB.MI",
     "MONC.MI",
     "NEXI.MI",
     "PST.MI",
@@ -80,7 +75,6 @@
     "BAC",
     "GS",
     "MS",
-    "BRK-B",
     "XOM",
     "CVX",
     "LLY",
@@ -114,7 +108,13 @@
     "NOVN.SW",
     "UBSG.SW",
     "CFR.SW",
-    "SREN.SW"
+    "SREN.SW",
+    "ECMPM.MI",
+    "CBRE",
+    "VNA.DE",
+    "CSGP",
+    "OPEN",
+    "NEE"
   ],
   "Financial Services": {
     "value": [
