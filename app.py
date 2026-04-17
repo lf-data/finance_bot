@@ -105,7 +105,7 @@ def api_ticker_detail(ticker: str):
             sr.score_finale, sr.classificazione, sr.rank,
             -- Extra
             sr.operating_margin, sr.profit_margin, sr.rev_growth, sr.roa,
-            sr.current_ratio, sr.dividend_yield, sr.peg, sr.week52_change,
+            sr.current_ratio, sr.dividend_yield, sr.peg, sr.week52_change, sr.wacc,
             -- AI
             sr.commento_ai
         FROM screener_results sr
@@ -163,7 +163,7 @@ def api_latest():
             sr.mom_12m1m, sr.eps_rev, sr.rel_strength, sr.fcf_growth, sr.score_momentum,
             sr.score_finale, sr.classificazione, sr.rank,
             sr.operating_margin, sr.profit_margin, sr.rev_growth, sr.roa,
-            sr.current_ratio, sr.dividend_yield, sr.peg, sr.week52_change,
+            sr.current_ratio, sr.dividend_yield, sr.peg, sr.week52_change, sr.wacc,
             sr.commento_ai, sr.run_date
         FROM screener_results sr
         JOIN screener_runs run ON sr.run_id = run.id

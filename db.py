@@ -107,6 +107,7 @@ CREATE TABLE IF NOT EXISTS screener_results (
     dividend_yield   NUMERIC(10, 4),
     peg              NUMERIC(10, 2),
     week52_change    NUMERIC(10, 2),
+    wacc             NUMERIC(10, 2),
     -- AI & errors
     commento_ai      TEXT,
     errore           TEXT
@@ -130,6 +131,7 @@ def ensure_schema() -> None:
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS eps_cagr_4y NUMERIC(10, 2)",
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS roic        NUMERIC(10, 2)",
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_growth  NUMERIC(10, 2)",
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS wacc        NUMERIC(10, 2)",
             ):
                 cur.execute(stmt)
         conn.commit()
@@ -183,7 +185,7 @@ def load_today_run() -> tuple[int, list[dict]] | None:
                     mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa,
-                    current_ratio, dividend_yield, peg, week52_change,
+                    current_ratio, dividend_yield, peg, week52_change, wacc,
                     commento_ai
                 FROM screener_results
                 WHERE run_id = %s
@@ -279,6 +281,7 @@ def save_run(    results: list[dict],
                     _clean(r.get("dividend_yield")),
                     _clean(r.get("peg")),
                     _clean(r.get("52w_change")),
+                    _clean(r.get("wacc")),
                     # AI & errors
                     r.get("commento_ai") or None,
                     r.get("_errore") or None,
@@ -295,7 +298,7 @@ def save_run(    results: list[dict],
                     mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa, current_ratio,
-                    dividend_yield, peg, week52_change,
+                    dividend_yield, peg, week52_change, wacc,
                     commento_ai, errore
                 ) VALUES %s
                 """,

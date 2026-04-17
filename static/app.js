@@ -368,7 +368,9 @@ function buildDrawerBody(r) {
     </div>
     <div class="grid grid-cols-2 gap-2">
       ${mValThr('ROE',           r.roe,          '%', 'roe',          r.settore)}
-      ${mValThr('EBITDA Margin', r.ebitda_margin,'%', 'ebitda_margin',r.settore)}
+      ${r.settore === 'Financial Services'
+        ? mValThr('ROA',          r.roa,          '%', 'roa',          r.settore)
+        : mValThr('EBITDA Margin',r.ebitda_margin,'%', 'ebitda_margin',r.settore)}
       ${mValThr('ROIC',          r.roic,         '%', 'roic',         r.settore)}
       ${mValThr('D/E Ratio',     r.de_ratio,     'x', 'de_ratio',     r.settore)}
       ${mValThr('EPS CAGR ~4Y',  r.eps_cagr_4y ?? r.eps_cagr_5y,  '%', 'eps_cagr_4y',  r.settore)}
@@ -394,6 +396,7 @@ function buildDrawerBody(r) {
     <div class="grid grid-cols-2 gap-2">
       ${mVal('Gross Margin',  r.gross_margin,     '%')}
       ${r.settore !== 'Financial Services' ? mVal('P/Book', r.p_book, 'x') : ''}
+      ${mVal('WACC',          r.wacc,             '%')}
       ${mVal('Op. Margin',    r.operating_margin, '%')}
       ${mVal('Profit Margin', r.profit_margin,    '%')}
       ${mVal('Rev Growth',    r.rev_growth,       '%')}

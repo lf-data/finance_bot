@@ -51,6 +51,40 @@ def _get_yf_session() -> curl_requests.Session:
     return _local.session
 
 
+# ── Risk-free rate: ECB AAA sovereign curve 8Y (EUR) ─────────────────────────
+# Fonte: ECB Statistical Data Warehouse — yield curve AAA euro area, 8 anni.
+# Cachato 24h: non serve un aggiornamento più frequente per il WACC.
+_rf_cache: dict = {"rate": 0.04, "ts": 0.0}
+_RF_TTL = 86400  # 24 ore
+
+def _fetch_rf_rate() -> float:
+    """
+    Legge il tasso risk-free EUR dalla curva sovrana AAA BCE (8 anni).
+    Fallback a 4.0% se la richiesta fallisce.
+    """
+    if time.time() - _rf_cache["ts"] < _RF_TTL:
+        return _rf_cache["rate"]
+    try:
+        url = (
+            "https://data-api.ecb.europa.eu/service/data/"
+            "YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_8Y"
+            "?lastNObservations=1&format=jsondata"
+        )
+        # Usa curl_cffi per restare coerenti con il resto del codice (no dipendenze extra)
+        sess = curl_requests.Session(impersonate="chrome")
+        resp = sess.get(url, timeout=8)
+        resp.raise_for_status()
+        data  = resp.json()
+        value = data["dataSets"][0]["series"]["0:0:0:0:0:0:0"]["observations"]["0"][0]
+        rate  = float(value) / 100.0          # BCE restituisce in % (es. 2.85)
+        rate  = max(0.005, min(0.12, rate))   # sanity clamp 0.5%–12%
+        _rf_cache["rate"] = rate
+        _rf_cache["ts"]   = time.time()
+        return rate
+    except Exception:
+        return _rf_cache["rate"]             # last known good o fallback 4%
+
+
 # ── CLI HELPERS ───────────────────────────────────────────────────────────────
 
 def _print_status(msg: str) -> None:
@@ -201,11 +235,16 @@ _DA_INC_KEYS = ("Depreciation And Amortization", "Reconciled Depreciation",
 _OCF_KEYS    = ("Operating Cash Flow", "Cash Flows From Operations",
                 "Net Cash Provided By Operating Activities")
 _CAPEX_KEYS  = ("Capital Expenditure", "Capital Expenditures",
-                "Purchase Of Property Plant And Equipment")
+                "Purchase Of Property Plant And Equipment",
+                "Investments In Property Plant And Equipment",
+                "Capital Expenditure Reported",
+                "Net PPE Purchase And Sale")
 _DEBT_KEYS   = ("Total Debt", "Long Term Debt", "Total Long Term Debt")
 _CASH_KEYS   = ("Cash And Cash Equivalents",
                 "Cash Cash Equivalents And Short Term Investments")
 _ASSETS_KEYS = ("Total Assets",)
+_INT_EXP_KEYS = ("Interest Expense", "Interest Expense Non Operating",
+                 "Net Interest Income")   # negativo in yfinance → abs usato
 _TAX_PROV_KEYS = ("Tax Provision", "Income Tax Expense")
 _PRETAX_KEYS   = ("Pretax Income", "Income Before Tax")
 
@@ -405,17 +444,17 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
             ttm_fcf = (ttm_ocf + ttm_capex          # CapEx negativo in yfinance
                        if ttm_capex < 0
                        else ttm_ocf - ttm_capex)
-        # P/FCF = mktcap / TTM FCF
+        # P/FCF = mktcap / TTM FCF  (solo se FCF > 0: multiplo negativo non ha senso)
         if ttm_fcf is not None and ttm_fcf > 0 and mktcap:
             result["p_fcf"] = round(mktcap / ttm_fcf, 2)
-        if result.get("p_fcf") is None:
-            fcf_info = info.get("freeCashflow")
-            if fcf_info and mktcap and fcf_info > 0:
-                result["p_fcf"] = round(mktcap / fcf_info, 2)
-            if fcf_info and ttm_fcf is None and (fcf_info or 0) > 0:
-                ttm_fcf = float(fcf_info)
-        # FCF Yield = TTM FCF / Market Cap × 100
-        if ttm_fcf is not None and ttm_fcf > 0 and mktcap and mktcap > 0:
+        # Fallback su freeCashflow da info dict
+        fcf_info = info.get("freeCashflow")
+        if fcf_info is not None and ttm_fcf is None:
+            ttm_fcf = float(fcf_info)          # usa come stima TTM (anche negativo)
+        if result.get("p_fcf") is None and fcf_info and mktcap and fcf_info > 0:
+            result["p_fcf"] = round(mktcap / fcf_info, 2)
+        # FCF Yield = TTM FCF / Market Cap × 100  (mostrato anche se negativo)
+        if ttm_fcf is not None and mktcap and mktcap > 0:
             result["fcf_yield"] = round(ttm_fcf / mktcap * 100, 2)
 
         # ── QUALITY ────────────────────────────────────────────────────────
@@ -543,6 +582,7 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         result["rev_growth"] = rev_growth
 
         # FCF Growth YoY = (TTM FCF / Prior-year TTM FCF − 1) × 100
+        # Percorso 1: quarterly con >= 8 colonne (shift di 4 trimestri)
         if cf_q is not None and cf_q.shape[1] >= 8 and ttm_fcf is not None and ttm_fcf > 0:
             _ocf_prev = _ttm(_OCF_KEYS,   cf_q.iloc[:, 4:8], 4)
             _cx_prev  = _ttm(_CAPEX_KEYS, cf_q.iloc[:, 4:8], 4)
@@ -550,11 +590,82 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
                 _fcf_prev = (_ocf_prev + _cx_prev if _cx_prev < 0 else _ocf_prev - _cx_prev)
                 if _fcf_prev > 0:
                     result["fcf_growth"] = round((ttm_fcf / _fcf_prev - 1) * 100, 2)
+        # Percorso 2: fallback annual (es. banche europee con quarterly vuoto)
+        # cf_a ha colonne ordinate dal più recente, iloc[:,0] = anno corrente, iloc[:,1] = anno precedente
+        if result.get("fcf_growth") is None and cf_a is not None and cf_a.shape[1] >= 2 \
+                and ttm_fcf is not None and ttm_fcf > 0:
+            _ocf_prev_a = _mrq_nth(_OCF_KEYS,   cf_a, 1)
+            _cx_prev_a  = _mrq_nth(_CAPEX_KEYS, cf_a, 1)
+            if _ocf_prev_a is not None and _cx_prev_a is not None:
+                _fcf_prev_a = (_ocf_prev_a + _cx_prev_a if _cx_prev_a < 0 else _ocf_prev_a - _cx_prev_a)
+                if _fcf_prev_a > 0:
+                    result["fcf_growth"] = round((ttm_fcf / _fcf_prev_a - 1) * 100, 2)
 
         result["current_ratio"]  = _safe(info.get("currentRatio"))
         result["dividend_yield"] = _safe(info.get("dividendYield"))
-        result["peg"]            = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
+        # PEG: preferisci i valori pre-calcolati da Yahoo; fallback manuale
+        # PEG = P/E trailing / (earnings growth % annualizzato)
+        _peg = _safe(info.get("trailingPegRatio") or info.get("pegRatio"))
+        if _peg is None:
+            _pe_trail   = _safe(info.get("trailingPE"))
+            _eg         = _safe(info.get("earningsGrowth"))   # già in decimale (es. 0.284)
+            if _pe_trail is not None and _eg is not None and _eg > 0:
+                _peg = round(_pe_trail / (_eg * 100), 2)      # growth → %
+        result["peg"] = _peg
         result["52w_change"]     = _safe(info.get("52WeekChange"),     multiplier=100)
+
+        # ── WACC ──────────────────────────────────────────────────────────
+        # Re = Rf + β × ERP  (CAPM; Rf dinamico da BCE curva AAA 8Y, ERP 5.5%)
+        # Rd = TTM Interest Expense / Total Debt
+        # WACC = (E/V)×Re + (D/V)×Rd×(1-T)
+        _beta = _safe(info.get("beta"))
+        _rf   = _fetch_rf_rate()              # tasso BCE AAA sovrano EUR 8Y (cache 24h)
+        _erp  = 0.055                         # equity risk premium (Damodaran EUR)
+        if _beta is not None and _beta > 0:
+            _re = _rf + _beta * _erp
+        elif _beta is not None and _beta <= 0:
+            _re = _rf                     # beta ≤ 0 (es. oro/difensivi): costo equity = Rf
+        else:
+            _re = None
+        _total_debt = _mrq(_DEBT_KEYS, bs) or _safe(info.get("totalDebt"))
+        _int_exp_raw = _ttm(_INT_EXP_KEYS, inc, n_periods)
+        # Interest Expense è negativo in yfinance income stmt → prendi valore assoluto
+        _int_exp = abs(_int_exp_raw) if _int_exp_raw is not None else None
+        if _int_exp is None:
+            # Fallback 1: info dict
+            _ie_info = _safe(info.get("interestExpense"))
+            if _ie_info is not None:
+                _int_exp = abs(_ie_info)
+        if _int_exp is None:
+            # Fallback 2: "Interest Paid Supplemental Data" dal cashflow
+            #  (es. Salesforce, alcune US GAAP company che non espongono la riga I/S)
+            _int_paid = _ttm(("Interest Paid Supplemental Data",), cf, n_cf)
+            if _int_paid is not None:
+                _int_exp = abs(_int_paid)
+        if _int_exp is None and inc_a is not None:
+            # Fallback 3: annual income stmt (es. AAPL non espone Interest Expense quarterly)
+            _int_exp_a = _ttm(_INT_EXP_KEYS, inc_a, 1)
+            if _int_exp_a is not None:
+                _int_exp = abs(_int_exp_a)
+        if _int_exp is None and cf_a is not None:
+            # Fallback 4: Interest Paid da annual cashflow
+            _int_paid_a = _ttm(("Interest Paid Supplemental Data",), cf_a, 1)
+            if _int_paid_a is not None:
+                _int_exp = abs(_int_paid_a)
+        if _total_debt and _total_debt > 0 and _int_exp is not None and _int_exp >= 0:
+            _rd = _int_exp / _total_debt
+            _rd = max(0.005, min(0.20, _rd))  # clamp 0.5%–20%
+        else:
+            _rd = None
+        if _re is not None and _rd is not None and mktcap and _total_debt:
+            _E = mktcap
+            _D = _total_debt
+            _V = _E + _D
+            _wacc = (_E / _V) * _re + (_D / _V) * _rd * (1 - effective_tax_rate)
+            result["wacc"] = round(_wacc * 100, 2)   # in %
+        elif _re is not None and mktcap and (not _total_debt or _total_debt == 0):
+            # Azienda debt-free: WACC ≈ Re
+            result["wacc"] = round(_re * 100, 2)
         result["prezzo"]         = _safe(info.get("currentPrice") or info.get("regularMarketPrice"))
         # Rel. strength vs benchmark (extra — non scorata nel VQM, tenuta per analisi storica)
         result["rel_strength"]   = _rel_strength(t, benchmark)
@@ -767,7 +878,7 @@ _EXTRA_KEYS    = [
     "gross_margin",    # calcolato sempre, usato come ref
     "rel_strength",    # non scorata nel VQM ma tenuta per analisi storica
     "operating_margin", "profit_margin", "rev_growth", "roa",
-    "current_ratio", "dividend_yield", "peg", "52w_change",
+    "current_ratio", "dividend_yield", "peg", "52w_change", "wacc",
 ]
 
 

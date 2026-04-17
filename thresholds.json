@@ -151,9 +151,9 @@
         "lower_is_better": false
       },
       {
-        "metrica": "ebitda_margin",
-        "good": null,
-        "bad": null,
+        "metrica": "roa",
+        "good": 1.0,
+        "bad": 0.4,
         "lower_is_better": false
       },
       {
@@ -299,7 +299,7 @@
       {
         "metrica": "fcf_yield",
         "good": 5,
-        "bad": 1.5,
+        "bad": -5,
         "lower_is_better": false
       }
     ],
