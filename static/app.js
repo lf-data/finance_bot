@@ -392,7 +392,7 @@ function buildDrawerBody(r) {
     </div>
     <div class="grid grid-cols-2 gap-2">
       ${mValThr('Mom 12M-1M',  r.mom_12m1m,  '%', 'mom_12m1m',  r.settore)}
-      ${mValThr('EPS Revision',r.eps_rev,    '%', 'eps_rev',    r.settore)}
+      ${mValThr('Upside',      r.upside_consensus,'%', 'upside_consensus', r.settore)}
       ${mValThr('FCF Growth',  r.fcf_growth, '%', 'fcf_growth', r.settore)}
     </div>
   </div>
@@ -622,7 +622,7 @@ function sectorCardHTML(name, items) {
   ${sectionHead('Momentum', '#f97316', sid + '-m')}
     <div class="grid grid-cols-2 gap-1.5 pt-2 pb-1">
       ${smTile('Mom 12M–1M', avgField(items,'mom_12m1m'),  '%')}
-      ${smTile('EPS Rev',    avgField(items,'eps_rev'),    '%')}
+      ${smTile('Upside',     avgField(items,'upside_consensus'), '%')}
       ${smTile('FCF Growth', avgField(items,'fcf_growth'), '%')}
     </div>
   </div>

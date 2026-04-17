@@ -183,8 +183,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 15,
         "bad": -5,
         "lower_is_better": false
       },
@@ -263,9 +263,9 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 2,
-        "bad": -5,
+        "metrica": "upside_consensus",
+        "good": 12,
+        "bad": -8,
         "lower_is_better": false
       },
       {
@@ -343,9 +343,9 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 2,
-        "bad": -5,
+        "metrica": "upside_consensus",
+        "good": 12,
+        "bad": -8,
         "lower_is_better": false
       },
       {
@@ -423,8 +423,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 20,
         "bad": -5,
         "lower_is_better": false
       },
@@ -503,8 +503,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 30,
         "bad": -5,
         "lower_is_better": false
       },
@@ -583,8 +583,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 25,
         "bad": -5,
         "lower_is_better": false
       },
@@ -663,8 +663,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 25,
         "bad": -5,
         "lower_is_better": false
       },
@@ -743,8 +743,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 2,
+        "metrica": "upside_consensus",
+        "good": 15,
         "bad": -5,
         "lower_is_better": false
       },
@@ -823,8 +823,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 20,
         "bad": -5,
         "lower_is_better": false
       },
@@ -903,9 +903,9 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
-        "bad": -5,
+        "metrica": "upside_consensus",
+        "good": 15,
+        "bad": -10,
         "lower_is_better": false
       },
       {
@@ -983,8 +983,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 20,
         "bad": -5,
         "lower_is_better": false
       },
@@ -1063,8 +1063,8 @@
         "lower_is_better": false
       },
       {
-        "metrica": "eps_rev",
-        "good": 3,
+        "metrica": "upside_consensus",
+        "good": 20,
         "bad": -5,
         "lower_is_better": false
       },

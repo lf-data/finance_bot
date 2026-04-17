@@ -91,6 +91,7 @@ CREATE TABLE IF NOT EXISTS screener_results (
     -- Momentum
     mom_12m1m        NUMERIC(10, 2),
     eps_rev          NUMERIC(10, 2),
+    upside_consensus NUMERIC(10, 2),
     rel_strength     NUMERIC(10, 2),
     fcf_growth       NUMERIC(10, 2),
     score_momentum   NUMERIC(5,  2),
@@ -132,6 +133,7 @@ def ensure_schema() -> None:
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS roic        NUMERIC(10, 2)",
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_growth  NUMERIC(10, 2)",
                 "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS wacc        NUMERIC(10, 2)",
+                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS upside_consensus NUMERIC(10, 2)",
             ):
                 cur.execute(stmt)
         conn.commit()
@@ -182,7 +184,7 @@ def load_today_run() -> tuple[int, list[dict]] | None:
                     prezzo, mktcap,
                     ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
                     roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
-                    mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
+                    mom_12m1m, eps_rev, upside_consensus, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa,
                     current_ratio, dividend_yield, peg, week52_change, wacc,
@@ -265,6 +267,7 @@ def save_run(    results: list[dict],
                     # Momentum
                     _clean(r.get("mom_12m1m")),
                     _clean(r.get("eps_rev")),
+                    _clean(r.get("upside_consensus")),
                     _clean(r.get("rel_strength")),
                     _clean(r.get("fcf_growth")),
                     _clean(r.get("score_momentum")),
@@ -295,7 +298,7 @@ def save_run(    results: list[dict],
                     prezzo, mktcap,
                     ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
                     roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
-                    mom_12m1m, eps_rev, rel_strength, fcf_growth, score_momentum,
+                    mom_12m1m, eps_rev, upside_consensus, rel_strength, fcf_growth, score_momentum,
                     score_finale, classificazione, rank,
                     operating_margin, profit_margin, rev_growth, roa, current_ratio,
                     dividend_yield, peg, week52_change, wacc,

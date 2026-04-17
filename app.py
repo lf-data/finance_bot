@@ -100,7 +100,7 @@ def api_ticker_detail(ticker: str):
             sr.roe, sr.ebitda_margin, sr.gross_margin, sr.de_ratio,
             sr.eps_cagr_5y, sr.eps_cagr_4y, sr.roic, sr.score_quality,
             -- Momentum
-            sr.mom_12m1m, sr.eps_rev, sr.rel_strength, sr.fcf_growth, sr.score_momentum,
+            sr.mom_12m1m, sr.eps_rev, sr.upside_consensus, sr.rel_strength, sr.fcf_growth, sr.score_momentum,
             -- Final
             sr.score_finale, sr.classificazione, sr.rank,
             -- Extra
@@ -160,7 +160,7 @@ def api_latest():
             sr.ev_ebitda, sr.p_fcf, sr.pe, sr.p_book, sr.fcf_yield, sr.score_value,
             sr.roe, sr.ebitda_margin, sr.gross_margin, sr.de_ratio,
             sr.eps_cagr_5y, sr.eps_cagr_4y, sr.roic, sr.score_quality,
-            sr.mom_12m1m, sr.eps_rev, sr.rel_strength, sr.fcf_growth, sr.score_momentum,
+            sr.mom_12m1m, sr.eps_rev, sr.upside_consensus, sr.rel_strength, sr.fcf_growth, sr.score_momentum,
             sr.score_finale, sr.classificazione, sr.rank,
             sr.operating_margin, sr.profit_margin, sr.rev_growth, sr.roa,
             sr.current_ratio, sr.dividend_yield, sr.peg, sr.week52_change, sr.wacc,

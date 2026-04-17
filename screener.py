@@ -532,34 +532,25 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
 
         # EPS Revision proxy (yfinance non espone revisioni analisti dirette).
         # Priorità:
-        #   1. Forward EPS vs Trailing EPS: segnala quanto le stime forward
-        #      divergono dal realizzato; è il proxy più stabile.
-        #   2. earningsQuarterlyGrowth: crescita YoY trimestrale — utile come
-        #      indicatore di momentum EPS ma può essere enorme per turnaround
-        #      (es. BMPS: da perdite a utili → +300%). Usato solo come fallback.
-        # Il valore finale viene clampato a ±100% per evitare outlier nel display
-        # (lo score VQM è già limitato 0-10 dalle soglie good/bad).
-        eps_rev = None
-        fwd = info.get("forwardEps")
-        trl = info.get("trailingEps")
-        # Formula (fwd − trl) / |trl| × 100:
-        #   – trl > 0 (caso normale):  equivalente a fwd/trl − 1, stessa logica di prima
-        #   – trl < 0 e fwd > 0 (turnaround): risultato positivo, segnala correttamente
-        #     che gli analisti si aspettano un ritorno alla profittabilità
-        #   – trl < 0 e fwd < 0 (perdite crescenti): risultato negativo, corretto
-        # Guard: trl != 0 per evitare divisione per zero.
-        if fwd is not None and trl is not None and trl != 0:
-            eps_rev = round((fwd - trl) / abs(trl) * 100, 2)
-        if eps_rev is None:
-            for key in ("earningsQuarterlyGrowth", "earningsGrowth"):
-                v = info.get(key)
-                if v is not None:
-                    eps_rev = _safe(v, multiplier=100)
-                    break
-        # Clamp outlier: revisioni reali raramente escono da ±100%
-        if eps_rev is not None:
-            eps_rev = round(max(-100.0, min(100.0, eps_rev)), 2)
-        result["eps_rev"] = eps_rev
+        # ── Upside consensus (analyst price target vs current price) ──────────
+        # Misura quanto il target price medio degli analisti è sopra/sotto il
+        # prezzo corrente. Cattura implicitamente le revisioni delle stime perché
+        # gli analisti alzano il target quando alzano le stime.
+        # Filtro di confidenza: almeno 3 analisti — sotto soglia il target medio
+        # è troppo rumoroso per essere usato come segnale affidabile.
+        upside_consensus = None
+        try:
+            apt = t.analyst_price_targets
+            n_analysts = apt.get("numberOfAnalysts", 0) if isinstance(apt, dict) else 0
+            mean_target = apt.get("mean") if isinstance(apt, dict) else None
+            price = info.get("currentPrice") or info.get("regularMarketPrice")
+            if n_analysts >= 3 and mean_target and price and price > 0:
+                raw = (mean_target / price - 1) * 100
+                # Clamp ±80%: oltre questa soglia il target è solitamente stale
+                upside_consensus = round(max(-80.0, min(80.0, raw)), 2)
+        except Exception:
+            pass
+        result["upside_consensus"] = upside_consensus
 
         # ── Metriche supplementari ─────────────────────────────────────────
         # Operating Margin = TTM Operating Income / TTM Revenue * 100
@@ -842,9 +833,9 @@ def _ai_comment(row: dict) -> str:
         ("ebitda_margin", "EBITDA M%"),
         ("de_ratio",      "D/E"),
         ("eps_cagr_4y",   "EPS CAGR%"),
-        ("mom_12m1m",     "Mom 12M%"),
-        ("fcf_growth",    "FCF Gr%"),
-        ("eps_rev",       "EPS Rev%"),
+        ("mom_12m1m",        "Mom 12M%"),
+        ("fcf_growth",       "FCF Gr%"),
+        ("upside_consensus", "Upside%"),
     ]:
         v = row.get(k)
         if v is not None:
@@ -881,7 +872,7 @@ def _ai_comment(row: dict) -> str:
 
 _VALUE_KEYS    = ["ev_ebitda", "p_fcf", "pe", "fcf_yield"]
 _QUALITY_KEYS  = ["roe", "ebitda_margin", "roic", "de_ratio", "eps_cagr_4y"]
-_MOMENTUM_KEYS = ["mom_12m1m", "eps_rev", "fcf_growth"]
+_MOMENTUM_KEYS = ["mom_12m1m", "upside_consensus", "fcf_growth"]
 _EXTRA_KEYS    = [
     # calcolati ma non inclusi nei pillar VQM
     "p_book",          # valore per Financial Services (scorato), extra per gli altri
