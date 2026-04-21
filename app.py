@@ -20,27 +20,32 @@ from config import (
     POSTGRES_USER,
 )
 
-try:
-    from opentelemetry.instrumentation.flask import FlaskInstrumentor
-    from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
-    from opentelemetry.instrumentation.requests import RequestsInstrumentor
-    from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
-    from opentelemetry.instrumentation.logging import LoggingInstrumentor
-    from opentelemetry.instrumentation.threading import ThreadingInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+from opentelemetry.instrumentation.requests import RequestsInstrumentor
+from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
+from opentelemetry.instrumentation.logging import LoggingInstrumentor
+from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+from opentelemetry.instrumentation.flask import FlaskInstrumentor
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
 
-    # Prima di creare app = Flask(__name__)
-    FlaskInstrumentor().instrument()
-    Psycopg2Instrumentor().instrument()
-    RequestsInstrumentor().instrument()
-    URLLib3Instrumentor().instrument()
-    LoggingInstrumentor().instrument()
-    ThreadingInstrumentor().instrument()
-    HTTPXClientInstrumentor().instrument()
-except ImportError:
-    pass  # OpenTelemetry è opzionale, se non installato si disabilitano le metriche
+trace.set_tracer_provider(TracerProvider())
+
+span_processor = BatchSpanProcessor(ConsoleSpanExporter())
+trace.get_tracer_provider().add_span_processor(span_processor)
+
+Psycopg2Instrumentor().instrument()
+RequestsInstrumentor().instrument()
+URLLib3Instrumentor().instrument()
+LoggingInstrumentor().instrument(set_logging_format=False)
+ThreadingInstrumentor().instrument()
+HTTPXClientInstrumentor().instrument()
 
 app = Flask(__name__)
+
+FlaskInstrumentor().instrument_app(app)
 
 # ── Logging setup ────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -49,7 +54,11 @@ logging.basicConfig(
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
+
+tracer = trace.get_tracer(__name__)
 logger.info("Flask app inizializzata")
+
+
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -231,29 +240,30 @@ _run_status: dict = {"running": False, "error": None, "done": 0, "total": 0}
 
 
 def _do_run() -> None:
-    from screener import run_screener, DEFAULT_TICKERS
+    with tracer.start_as_current_span("screener-run"):
+        from screener import run_screener, DEFAULT_TICKERS
 
-    def _progress(done: int, total: int) -> None:
-        _run_status["done"]  = done
-        _run_status["total"] = total
-        logger.debug("Screener avanzamento — %d/%d ticker completati", done, total)
+        def _progress(done: int, total: int) -> None:
+            _run_status["done"]  = done
+            _run_status["total"] = total
+            logger.debug("Screener avanzamento — %d/%d ticker completati", done, total)
 
-    logger.info("Screener avviato in background — %d ticker da analizzare", len(DEFAULT_TICKERS))
-    t_start = _time.monotonic()
-    try:
-        _run_status["done"]  = 0
-        _run_status["total"] = len(DEFAULT_TICKERS)
-        run_screener(DEFAULT_TICKERS, progress_callback=_progress)
-        elapsed = _time.monotonic() - t_start
-        logger.info("Screener completato con successo — %.1fs per %d ticker", elapsed, len(DEFAULT_TICKERS))
-        _run_status["error"] = None
-    except Exception as exc:  # noqa: BLE001
-        elapsed = _time.monotonic() - t_start
-        logger.error("Screener run fallito dopo %.1fs — %s", elapsed, exc, exc_info=True)
-        _run_status["error"] = str(exc)
-    finally:
-        _run_status["running"] = False
-        _run_lock.release()
+        logger.info("Screener avviato in background — %d ticker da analizzare", len(DEFAULT_TICKERS))
+        t_start = _time.monotonic()
+        try:
+            _run_status["done"]  = 0
+            _run_status["total"] = len(DEFAULT_TICKERS)
+            run_screener(DEFAULT_TICKERS, progress_callback=_progress)
+            elapsed = _time.monotonic() - t_start
+            logger.info("Screener completato con successo — %.1fs per %d ticker", elapsed, len(DEFAULT_TICKERS))
+            _run_status["error"] = None
+        except Exception as exc:  # noqa: BLE001
+            elapsed = _time.monotonic() - t_start
+            logger.error("Screener run fallito dopo %.1fs — %s", elapsed, exc, exc_info=True)
+            _run_status["error"] = str(exc)
+        finally:
+            _run_status["running"] = False
+            _run_lock.release()
 
 
 @app.route("/api/run-screener", methods=["POST"])
