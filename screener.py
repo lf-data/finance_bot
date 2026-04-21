@@ -946,6 +946,7 @@ def run_screener(
     tickers: list[str],
     benchmark_override: str | None = None,
     ai: bool = False,
+    progress_callback=None,
 ) -> tuple[list[dict], int | None]:
     """
     Pipeline principale:
@@ -977,6 +978,8 @@ def run_screener(
             results[ticker] = {"ticker": ticker, "_errore": str(exc)}
             fetch_log.append((ticker, {"ticker": ticker, "_errore": str(exc)}, 0.0, str(exc)))
         done += 1
+        if progress_callback:
+            progress_callback(done, total)
 
     _clear_line()
 

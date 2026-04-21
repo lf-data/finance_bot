@@ -26,4 +26,7 @@ APScheduler>=3.10.0
 # ── Display ───────────────────────────────────────────────────────────────────
 colorama>=0.4.6
 
+# ── Opentelemtry ───────────────────────────────────────────────────────────────────
+opentelemetry-distro
+opentelemetry-exporter-otlp
 

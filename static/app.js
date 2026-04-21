@@ -63,12 +63,12 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // Se lo screener era già in corso prima del refresh, riattacca il polling
-  fetch('/api/run-screener/status').then(r => r.json()).then(({ running }) => {
+  fetch('/api/run-screener/status').then(r => r.json()).then(({ running, done, total }) => {
     if (running) {
       const btn   = document.getElementById('run-btn');
       const icon  = document.getElementById('run-icon');
       const label = document.getElementById('run-label');
-      _pollScreener(btn, icon, label);
+      _pollScreener(btn, icon, label, done, total);
     }
   }).catch(() => {});
 });
@@ -152,29 +152,69 @@ async function runScreener() {
   _pollScreener(btn, icon, label);
 }
 
-function _pollScreener(btn, icon, label) {
+function _showScreenerError(msg) {
+  // Crea un toast di errore temporaneo
+  const toast = document.createElement('div');
+  toast.id = 'screener-error-toast';
+  toast.style.cssText = [
+    'position:fixed', 'bottom:1.5rem', 'right:1.5rem', 'z-index:9999',
+    'background:#1c1c22', 'border:1px solid #f87171', 'border-radius:0.5rem',
+    'padding:0.75rem 1rem', 'max-width:22rem', 'box-shadow:0 4px 24px #0008',
+    'display:flex', 'align-items:flex-start', 'gap:0.5rem'
+  ].join(';');
+  toast.innerHTML = `
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171"
+      stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px">
+      <circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/>
+      <line x1="12" y1="16" x2="12.01" y2="16"/>
+    </svg>
+    <div>
+      <p style="color:#f87171;font-size:0.8rem;font-weight:600;margin:0 0 2px">Screener fallito</p>
+      <p style="color:#9ca3af;font-size:0.75rem;margin:0;word-break:break-word">${msg.slice(0, 120)}</p>
+    </div>`;
+  // Rimuovi toast precedente se esiste
+  document.getElementById('screener-error-toast')?.remove();
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 8000);
+}
+
+function _pollScreener(btn, icon, label, initialDone = 0, initialTotal = 0) {
   btn.disabled = true;
   // Sostituisce icona play con spinner
   icon.outerHTML = `<svg id="run-icon" class="spin" width="11" height="11" viewBox="0 0 24 24"
     fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
     <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
   </svg>`;
-  label.textContent = 'In corso…';
+  const lbl = document.getElementById('run-label');
+  if (lbl) {
+    lbl.textContent = (initialTotal > 0) ? `${initialDone}/${initialTotal} in corso…` : 'In corso…';
+  }
 
   const interval = setInterval(async () => {
     try {
       const s = await fetch('/api/run-screener/status');
-      const { running, error } = await s.json();
-      if (!running) {
+      const { running, error, done, total } = await s.json();
+      if (running) {
+        // Aggiorna il progresso mentre lo screener gira
+        const lbl = document.getElementById('run-label');
+        if (lbl && total > 0) {
+          lbl.textContent = `${done}/${total} in corso…`;
+        }
+      } else {
         clearInterval(interval);
         // Ripristina pulsante
         btn.disabled = false;
         document.getElementById('run-icon').outerHTML = `<svg id="run-icon" width="11" height="11"
           viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>`;
         document.getElementById('run-label').textContent = 'Screener';
-        // Ricarica i dati
-        await loadLatest();
-        await loadLastRunLabel();
+        // Mostra errore se lo screener è fallito
+        if (error) {
+          _showScreenerError(error);
+        } else {
+          // Ricarica i dati solo se completato con successo
+          await loadLatest();
+          await loadLastRunLabel();
+        }
       }
     } catch { /* rete momentaneamente irraggiungibile */ }
   }, 2000);
@@ -1259,21 +1299,24 @@ function _renderPortfolioPie(sorted, etfItems, hasValues, totalValue) {
   if (!canvas) return;
   if (portfolioChart) { portfolioChart.destroy(); portfolioChart = null; }
 
-  const labels = sorted.map(p => p.ticker).concat(etfItems.map(p => p.ticker));
-  
+  // ETF/ETC aggregati in un'unica fetta
+  const totalSlices = sorted.length + (etfItems.length > 0 ? 1 : 0);
+  const etfTotalVal = etfItems.reduce((s, p) => s + (p.posVal ?? 0), 0);
+
+  const labels = sorted.map(p => p.ticker).concat(etfItems.length > 0 ? ['ETF / ETC'] : []);
+
   const data = sorted.map(p => {
     if (hasValues && totalValue > 0)
       return p.posVal != null ? +((p.posVal / totalValue) * 100).toFixed(2) : 0;
-    return +(100 / (sorted.length + etfItems.length)).toFixed(2);
-  }).concat(etfItems.map(p => {
-    if (hasValues && totalValue > 0)
-      return p.posVal != null ? +((p.posVal / totalValue) * 100).toFixed(2) : 0;
-    return +(100 / (sorted.length + etfItems.length)).toFixed(2);
-  }));
+    return +(100 / totalSlices).toFixed(2);
+  }).concat(etfItems.length > 0 ? [
+    hasValues && totalValue > 0
+      ? +((etfTotalVal / totalValue) * 100).toFixed(2)
+      : +(100 / totalSlices).toFixed(2)
+  ] : []);
 
   const stockColors = _pieColors(sorted.length);
-  const etfColors   = etfItems.map(() => '#60a5fa');
-  const colors      = stockColors.concat(etfColors);
+  const colors      = stockColors.concat(etfItems.length > 0 ? ['#60a5fa'] : []);
 
   portfolioChart = new Chart(canvas, {
     type: 'doughnut',

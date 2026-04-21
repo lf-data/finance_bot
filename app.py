@@ -177,13 +177,20 @@ def api_latest():
 # ── Manual screener run ──────────────────────────────────────────────────────
 
 _run_lock   = threading.Lock()
-_run_status: dict = {"running": False, "error": None}
+_run_status: dict = {"running": False, "error": None, "done": 0, "total": 0}
 
 
 def _do_run() -> None:
     from screener import run_screener, DEFAULT_TICKERS
+
+    def _progress(done: int, total: int) -> None:
+        _run_status["done"]  = done
+        _run_status["total"] = total
+
     try:
-        run_screener(DEFAULT_TICKERS)
+        _run_status["done"]  = 0
+        _run_status["total"] = len(DEFAULT_TICKERS)
+        run_screener(DEFAULT_TICKERS, progress_callback=_progress)
         _run_status["error"] = None
     except Exception as exc:  # noqa: BLE001
         app.logger.error("Screener run fallito — %s", exc)
@@ -200,6 +207,8 @@ def api_run_screener():
         return jsonify({"running": True, "error": None}), 409
     _run_status["running"] = True
     _run_status["error"]   = None
+    _run_status["done"]    = 0
+    _run_status["total"]   = 0
     threading.Thread(target=_do_run, daemon=True, name="screener-manual").start()
     return jsonify({"running": True, "error": None}), 202
 
