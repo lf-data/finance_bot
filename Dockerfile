@@ -21,4 +21,4 @@ COPY . .
 
 EXPOSE 5001
 
-CMD ["opentelemetry-instrument", "python", "app.py"]
+CMD ["python", "app.py"]

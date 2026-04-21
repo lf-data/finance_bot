@@ -35,7 +35,11 @@ from config import (
     TAVILY_API_KEY,
 )
 
-logging.disable(logging.CRITICAL)
+# Logger senza handler propri: i log vengono raccolti esclusivamente da
+# OpenTelemetry (LoggingInstrumentor) tramite il root logger.
+# Nessun output su terminale né su file.
+logger = logging.getLogger("screener")
+logger.setLevel(logging.DEBUG)
 colorama.init(autoreset=True)
 
 # Per-thread curl_cffi sessions: curl_cffi.requests.Session is not thread-safe
@@ -62,7 +66,9 @@ def _fetch_rf_rate() -> float:
     Fallback a 4.0% se la richiesta fallisce.
     """
     if time.time() - _rf_cache["ts"] < _RF_TTL:
+        logger.debug("RF rate da cache — %.4f%%", _rf_cache["rate"] * 100)
         return _rf_cache["rate"]
+    logger.info("Aggiornamento RF rate da BCE AAA curve 8Y")
     try:
         url = (
             "https://data-api.ecb.europa.eu/service/data/"
@@ -79,8 +85,10 @@ def _fetch_rf_rate() -> float:
         rate  = max(0.005, min(0.12, rate))   # sanity clamp 0.5%–12%
         _rf_cache["rate"] = rate
         _rf_cache["ts"]   = time.time()
+        logger.info("RF rate aggiornato — %.4f%%", rate * 100)
         return rate
-    except Exception:
+    except Exception as exc:
+        logger.warning("Impossibile aggiornare RF rate — %s — uso fallback %.4f%%", exc, _rf_cache["rate"] * 100)
         return _rf_cache["rate"]             # last known good o fallback 4%
 
 
@@ -299,6 +307,8 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
       2. Fallback su annual statements se quarterly non disponibili.
       3. Fallback su info dict come ultima risorsa.
     """
+    logger.debug("fetch_metrics START — ticker=%s benchmark=%s", ticker, benchmark)
+    _t0_fm = time.perf_counter()
     result: dict = {"ticker": ticker}
     try:
         t = yf.Ticker(ticker, session=_get_yf_session())
@@ -671,10 +681,20 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
         result["rel_strength"]   = _rel_strength(t, benchmark)
 
     except Exception as exc:
+        logger.error("fetch_metrics ERRORE — ticker=%s — %s", ticker, exc, exc_info=True)
         result["_errore"] = str(exc)
 
     # Rimuovi None per pulizia
-    return {k: v for k, v in result.items() if v is not None}
+    clean = {k: v for k, v in result.items() if v is not None}
+    _elapsed_fm = time.perf_counter() - _t0_fm
+    if result.get("_errore"):
+        logger.warning("fetch_metrics FALLITO — ticker=%s elapsed=%.2fs", ticker, _elapsed_fm)
+    else:
+        logger.debug(
+            "fetch_metrics OK — ticker=%s score_finale=%s cls=%s elapsed=%.2fs metriche=%d",
+            ticker, result.get("score_finale"), result.get("classificazione"), _elapsed_fm, len(clean),
+        )
+    return clean
 
 
 # ── SCORING VQM ──────────────────────────────────────────────────────────────
@@ -803,8 +823,11 @@ def _search_ticker_news(ticker: str, nome: str) -> str:
             parts.append(answer)
         if headlines:
             parts.append("Headlines: " + " | ".join(headlines[:4]))
-        return " ".join(parts)[:800]
-    except Exception:
+        snippet = " ".join(parts)[:800]
+        logger.debug("_search_ticker_news OK — ticker=%s chars=%d", ticker, len(snippet))
+        return snippet
+    except Exception as exc:
+        logger.warning("_search_ticker_news ERRORE — ticker=%s — %s", ticker, exc)
         return ""
 
 
@@ -820,7 +843,9 @@ def _ai_comment(row: dict) -> str:
 
     ticker = row.get("ticker", "?")
     nome   = row.get("nome", ticker)
+    logger.debug("_ai_comment START — ticker=%s", ticker)
     news   = _search_ticker_news(ticker, nome)
+    logger.debug("_ai_comment news — ticker=%s chars=%d", ticker, len(news))
 
     metric_parts: list[str] = []
     for k, lbl in [
@@ -864,8 +889,11 @@ def _ai_comment(row: dict) -> str:
             SystemMessage(content=system),
             HumanMessage(content=user_msg),
         ])
-        return getattr(response, "content", "").strip()
-    except Exception:
+        comment = getattr(response, "content", "").strip()
+        logger.debug("_ai_comment OK — ticker=%s chars=%d", ticker, len(comment))
+        return comment
+    except Exception as exc:
+        logger.warning("_ai_comment ERRORE — ticker=%s — %s", ticker, exc)
         return ""
 
 
@@ -934,12 +962,24 @@ def _fetch_and_score(ticker: str, benchmark_override: str | None) -> tuple[str, 
     """Fetch + score per un singolo ticker. Usato da ThreadPoolExecutor."""
     t0        = time.perf_counter()
     benchmark = _benchmark_for_ticker(ticker, benchmark_override)
+    logger.debug("_fetch_and_score — ticker=%s benchmark=%s", ticker, benchmark)
     m   = fetch_metrics(ticker, benchmark)
     s   = calc_vqm_score(m)
     row = {**m, **s}
     row["classificazione"] = _classify(s.get("score_finale"))
     row["benchmark"] = benchmark
-    return ticker, row, time.perf_counter() - t0
+    elapsed = time.perf_counter() - t0
+    logger.info(
+        "Scored — %s  score=%.2f  cls=%s  V=%.2f Q=%.2f M=%.2f  (%.1fs)",
+        ticker,
+        row.get("score_finale") or -1,
+        row.get("classificazione", "N/D"),
+        row.get("score_value") or -1,
+        row.get("score_quality") or -1,
+        row.get("score_momentum") or -1,
+        elapsed,
+    )
+    return ticker, row, elapsed
 
 
 def run_screener(
@@ -959,6 +999,11 @@ def run_screener(
     if not tickers:
         return [], None
 
+    logger.info(
+        "run_screener START — %d ticker, benchmark=%s, ai=%s",
+        len(tickers), benchmark_override or "auto", ai,
+    )
+    _t0_rs = time.monotonic()
     total   = len(tickers)
     results: dict[str, dict] = {}
 
@@ -974,7 +1019,10 @@ def run_screener(
             _, row, elapsed = _fetch_and_score(ticker, benchmark_override)
             results[ticker] = row
             fetch_log.append((ticker, row, elapsed, None))
+            if row.get("_errore"):
+                logger.warning("Ticker %s — errore fetch: %s", ticker, row["_errore"])
         except Exception as exc:
+            logger.error("Ticker %s — eccezione imprevista: %s", ticker, exc, exc_info=True)
             results[ticker] = {"ticker": ticker, "_errore": str(exc)}
             fetch_log.append((ticker, {"ticker": ticker, "_errore": str(exc)}, 0.0, str(exc)))
         done += 1
@@ -1060,6 +1108,12 @@ def run_screener(
     # ── Fase 3: salvataggio su PostgreSQL ───────────────────────────────
     run_id = db_module.save_run(ordered, benchmark_override or "auto", ai_enabled=ai)
 
+    _n_ok  = sum(1 for r in ordered if not r.get("_errore"))
+    _n_err = sum(1 for r in ordered if r.get("_errore"))
+    logger.info(
+        "run_screener COMPLETATO — ok=%d errori=%d run_id=%s elapsed=%.1fs",
+        _n_ok, _n_err, run_id, time.monotonic() - _t0_rs,
+    )
     return ordered, run_id
 
 

@@ -3,6 +3,7 @@
 import decimal
 import datetime
 import json as _json
+import logging
 import os
 import threading
 import time as _time
@@ -41,10 +42,20 @@ except ImportError:
 
 app = Flask(__name__)
 
+# ── Logging setup ────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-8s] %(name)s — %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger(__name__)
+logger.info("Flask app inizializzata")
+
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
 def _get_conn():
+    logger.debug("Apertura connessione DB — host=%s port=%s db=%s", POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB)
     return psycopg2.connect(
         host=POSTGRES_HOST,
         port=POSTGRES_PORT,
@@ -64,11 +75,17 @@ def _normalize(v):
 
 
 def _query(sql: str, params=None) -> list[dict]:
+    logger.debug("Esecuzione query — params=%s sql_preview=%.120s", params, sql.strip())
     conn = _get_conn()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
-            return [{k: _normalize(v) for k, v in row.items()} for row in cur.fetchall()]
+            rows = [{k: _normalize(v) for k, v in row.items()} for row in cur.fetchall()]
+            logger.debug("Query completata — %d righe restituite", len(rows))
+            return rows
+    except Exception as exc:
+        logger.error("Errore query DB — %s", exc, exc_info=True)
+        raise
     finally:
         conn.close()
 
@@ -77,12 +94,14 @@ def _query(sql: str, params=None) -> list[dict]:
 
 @app.route("/")
 def index():
+    logger.info("GET / — dashboard richiesta da %s", request.remote_addr)
     return render_template("index.html")
 
 
 @app.route("/sw.js")
 def service_worker():
     """Serve il service worker dalla root per avere scope completo."""
+    logger.debug("GET /sw.js — service worker servito a %s", request.remote_addr)
     resp = send_from_directory("static", "sw.js",
                                mimetype="application/javascript")
     resp.headers["Service-Worker-Allowed"] = "/"
@@ -93,6 +112,7 @@ def service_worker():
 @app.route("/api/tickers")
 def api_tickers():
     """Lista di tutti i ticker con l'ultimo score disponibile."""
+    logger.info("GET /api/tickers — richiesto da %s", request.remote_addr)
     rows = _query("""
         SELECT DISTINCT ON (ticker)
             ticker, nome, settore, industria, valuta, benchmark,
@@ -103,12 +123,14 @@ def api_tickers():
         WHERE errore IS NULL
         ORDER BY ticker, run_date DESC
     """)
+    logger.info("GET /api/tickers — %d ticker restituiti", len(rows))
     return jsonify(rows)
 
 
 @app.route("/api/ticker/<ticker>")
 def api_ticker_detail(ticker: str):
     """Serie storica completa per un ticker."""
+    logger.info("GET /api/ticker/%s — richiesto da %s", ticker.upper(), request.remote_addr)
     rows = _query("""
         SELECT
             sr.run_date,
@@ -133,13 +155,16 @@ def api_ticker_detail(ticker: str):
         WHERE sr.ticker = %s AND sr.errore IS NULL
         ORDER BY sr.run_date ASC
     """, (ticker.upper(),))
+    logger.info("GET /api/ticker/%s — %d run restituite", ticker.upper(), len(rows))
     return jsonify(rows)
 
 
 @app.route("/api/thresholds")
 def api_thresholds():
     """Soglie VQM per settore (per il drawer metriche). Struttura: {settore: {metrica: {good, bad, lower_is_better}}}."""
+    logger.info("GET /api/thresholds — richiesto da %s", request.remote_addr)
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "thresholds.json")
+    logger.debug("Caricamento thresholds da %s", path)
     with open(path, encoding="utf-8") as f:
         raw = _json.load(f)
     reserved = {"pesi", "tickers"}
@@ -155,24 +180,28 @@ def api_thresholds():
                     "bad":  e["bad"],
                     "lower_is_better": e["lower_is_better"],
                 }
+    logger.debug("GET /api/thresholds — %d settori restituiti", len(out))
     return jsonify(out)
 
 
 @app.route("/api/runs")
 def api_runs():
     """Lista delle ultime 30 esecuzioni."""
+    logger.info("GET /api/runs — richiesto da %s", request.remote_addr)
     rows = _query("""
         SELECT id, run_at, run_date, benchmark, ai_enabled, n_tickers
         FROM screener_runs
         ORDER BY run_at DESC
         LIMIT 30
     """)
+    logger.info("GET /api/runs — %d run restituite", len(rows))
     return jsonify(rows)
 
 
 @app.route("/api/latest")
 def api_latest():
     """Tutti i risultati dell'ultima esecuzione, ordinati per rank."""
+    logger.info("GET /api/latest — richiesto da %s", request.remote_addr)
     rows = _query("""
         SELECT
             sr.ticker, sr.nome, sr.settore, sr.industria, sr.valuta, sr.benchmark,
@@ -191,6 +220,7 @@ def api_latest():
           AND sr.errore IS NULL
         ORDER BY sr.rank ASC
     """)
+    logger.info("GET /api/latest — %d titoli restituiti", len(rows))
     return jsonify(rows)
 
 
@@ -206,14 +236,20 @@ def _do_run() -> None:
     def _progress(done: int, total: int) -> None:
         _run_status["done"]  = done
         _run_status["total"] = total
+        logger.debug("Screener avanzamento — %d/%d ticker completati", done, total)
 
+    logger.info("Screener avviato in background — %d ticker da analizzare", len(DEFAULT_TICKERS))
+    t_start = _time.monotonic()
     try:
         _run_status["done"]  = 0
         _run_status["total"] = len(DEFAULT_TICKERS)
         run_screener(DEFAULT_TICKERS, progress_callback=_progress)
+        elapsed = _time.monotonic() - t_start
+        logger.info("Screener completato con successo — %.1fs per %d ticker", elapsed, len(DEFAULT_TICKERS))
         _run_status["error"] = None
     except Exception as exc:  # noqa: BLE001
-        app.logger.error("Screener run fallito — %s", exc)
+        elapsed = _time.monotonic() - t_start
+        logger.error("Screener run fallito dopo %.1fs — %s", elapsed, exc, exc_info=True)
         _run_status["error"] = str(exc)
     finally:
         _run_status["running"] = False
@@ -224,7 +260,9 @@ def _do_run() -> None:
 def api_run_screener():
     """Avvia lo screener in background. Se già in esecuzione restituisce 409."""
     if not _run_lock.acquire(blocking=False):
+        logger.warning("POST /api/run-screener — screener già in esecuzione, richiesta rifiutata (409)")
         return jsonify({"running": True, "error": None}), 409
+    logger.info("POST /api/run-screener — avvio screener manuale da %s", request.remote_addr)
     _run_status["running"] = True
     _run_status["error"]   = None
     _run_status["done"]    = 0
@@ -236,6 +274,8 @@ def api_run_screener():
 @app.route("/api/run-screener/status")
 def api_run_screener_status():
     """Stato corrente dell'esecuzione: {running, error}."""
+    logger.debug("GET /api/run-screener/status — running=%s done=%d total=%d",
+                 _run_status["running"], _run_status["done"], _run_status["total"])
     return jsonify(_run_status)
 
 
@@ -248,8 +288,12 @@ _FX_TTL = 3600  # 1 ora
 @app.route("/api/fx-rates")
 def api_fx_rates():
     """Tassi di cambio verso EUR, cachati 1h. Usa yfinance come fonte."""
+    logger.info("GET /api/fx-rates — richiesto da %s", request.remote_addr)
     if _time.time() - _fx_cache["ts"] < _FX_TTL:
+        age = int(_time.time() - _fx_cache["ts"])
+        logger.debug("FX rates serviti da cache (età %ds, TTL %ds)", age, _FX_TTL)
         return jsonify(_fx_cache["rates"])
+    logger.info("FX rates cache scaduta — recupero tassi aggiornati da yfinance")
     try:
         import yfinance as yf
         pairs = {
@@ -268,14 +312,18 @@ def api_fx_rates():
                 price = getattr(info, "last_price", None) or getattr(info, "regular_market_previous_close", None)
                 if price and price > 0:
                     rates[currency] = round(float(price), 6)
-            except Exception:
-                pass
+                    logger.debug("Tasso FX aggiornato — %s/%s = %.6f", currency, "EUR", rates[currency])
+            except Exception as fx_exc:
+                logger.warning("Impossibile ottenere tasso FX per %s (%s) — %s", currency, symbol, fx_exc)
         if len(rates) > 1:  # almeno un tasso ottenuto
             _fx_cache["rates"] = rates
             _fx_cache["ts"]    = _time.time()
+            logger.info("FX rates aggiornati — %d valute in cache", len(rates))
+        else:
+            logger.warning("Nessun tasso FX ottenuto — restituzione cache precedente")
         return jsonify(_fx_cache["rates"])
     except Exception as exc:
-        app.logger.warning("FX rates fetch fallito: %s", exc)
+        logger.warning("FX rates fetch fallito: %s", exc, exc_info=True)
         return jsonify(_fx_cache["rates"])
 
 
