@@ -10,7 +10,11 @@ RUN pip install --no-cache-dir \
     opentelemetry-distro \
     opentelemetry-exporter-otlp-proto-grpc \
     opentelemetry-instrumentation-flask \
+    opentelemetry-instrumentation-psycopg2 \
     opentelemetry-instrumentation-requests \
+    opentelemetry-instrumentation-urllib3 \
+    opentelemetry-instrumentation-httpx \
+    opentelemetry-instrumentation-threading \
     opentelemetry-instrumentation-logging
 
 COPY . .

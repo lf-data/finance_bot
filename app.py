@@ -19,6 +19,26 @@ from config import (
     POSTGRES_USER,
 )
 
+try:
+    from opentelemetry.instrumentation.flask import FlaskInstrumentor
+    from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
+    from opentelemetry.instrumentation.requests import RequestsInstrumentor
+    from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
+    from opentelemetry.instrumentation.logging import LoggingInstrumentor
+    from opentelemetry.instrumentation.threading import ThreadingInstrumentor
+    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
+
+    # Prima di creare app = Flask(__name__)
+    FlaskInstrumentor().instrument()
+    Psycopg2Instrumentor().instrument()
+    RequestsInstrumentor().instrument()
+    URLLib3Instrumentor().instrument()
+    LoggingInstrumentor().instrument()
+    ThreadingInstrumentor().instrument()
+    HTTPXClientInstrumentor().instrument()
+except ImportError:
+    pass  # OpenTelemetry è opzionale, se non installato si disabilitano le metriche
+
 app = Flask(__name__)
 
 
