@@ -6,6 +6,7 @@ Schema (time-series per ticker):
 """
 
 import datetime
+import logging
 import math
 
 import psycopg2
@@ -17,6 +18,34 @@ from config import (
     POSTGRES_PASSWORD,
     POSTGRES_PORT,
     POSTGRES_USER,
+)
+from telemetry import get_tracer, get_meter
+
+logger = logging.getLogger(__name__)
+
+_tracer = get_tracer(__name__)
+_meter  = get_meter(__name__)
+
+# ── DB metrics instruments ────────────────────────────────────────────────
+_save_run_duration = _meter.create_histogram(
+    name="db.save_run.duration",
+    description="Durata salvataggio run screener su DB (s)",
+    unit="s",
+)
+_save_run_rows = _meter.create_histogram(
+    name="db.save_run.rows",
+    description="Numero di righe inserite per run",
+    unit="{rows}",
+)
+_load_today_run_hits = _meter.create_counter(
+    name="db.load_today_run.hits",
+    description="Numero di volte che il run di oggi è stato trovato in cache DB",
+    unit="{hits}",
+)
+_db_errors = _meter.create_counter(
+    name="db.errors",
+    description="Errori DB per operazione",
+    unit="{errors}",
 )
 
 
@@ -34,18 +63,22 @@ def _connect(dbname: str) -> "psycopg2.connection":
 
 def ensure_db() -> None:
     """Crea il database se non esiste (connettendosi prima a 'postgres')."""
-    conn = _connect("postgres")
-    conn.autocommit = True
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT 1 FROM pg_database WHERE datname = %s",
-                (POSTGRES_DB,),
-            )
-            if not cur.fetchone():
-                cur.execute(f'CREATE DATABASE "{POSTGRES_DB}"')
-    finally:
-        conn.close()
+    with _tracer.start_as_current_span("db.ensure_db"):
+        conn = _connect("postgres")
+        conn.autocommit = True
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM pg_database WHERE datname = %s",
+                    (POSTGRES_DB,),
+                )
+                if not cur.fetchone():
+                    cur.execute(f'CREATE DATABASE "{POSTGRES_DB}"')
+                    logger.info("DB '%s' creato", POSTGRES_DB)
+                else:
+                    logger.debug("DB '%s' già esistente", POSTGRES_DB)
+        finally:
+            conn.close()
 
 
 # ── Schema ────────────────────────────────────────────────────────────────────
@@ -122,23 +155,25 @@ CREATE INDEX IF NOT EXISTS idx_sr_run_id   ON screener_results(run_id);
 
 def ensure_schema() -> None:
     """Crea tabelle e indici se non esistono; applica migrazioni per colonne nuove."""
-    conn = _connect(POSTGRES_DB)
-    try:
-        with conn.cursor() as cur:
-            cur.execute(_DDL)
-            # Migrations: ADD COLUMN IF NOT EXISTS per colonne aggiunte dopo la creazione iniziale
-            for stmt in (
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_yield   NUMERIC(10, 2)",
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS eps_cagr_4y NUMERIC(10, 2)",
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS roic        NUMERIC(10, 2)",
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_growth  NUMERIC(10, 2)",
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS wacc        NUMERIC(10, 2)",
-                "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS upside_consensus NUMERIC(10, 2)",
-            ):
-                cur.execute(stmt)
-        conn.commit()
-    finally:
-        conn.close()
+    with _tracer.start_as_current_span("db.ensure_schema"):
+        conn = _connect(POSTGRES_DB)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(_DDL)
+                # Migrations: ADD COLUMN IF NOT EXISTS per colonne aggiunte dopo la creazione iniziale
+                for stmt in (
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_yield   NUMERIC(10, 2)",
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS eps_cagr_4y NUMERIC(10, 2)",
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS roic        NUMERIC(10, 2)",
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS fcf_growth  NUMERIC(10, 2)",
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS wacc        NUMERIC(10, 2)",
+                    "ALTER TABLE screener_results ADD COLUMN IF NOT EXISTS upside_consensus NUMERIC(10, 2)",
+                ):
+                    cur.execute(stmt)
+            conn.commit()
+            logger.debug("Schema DB verificato/aggiornato")
+        finally:
+            conn.close()
 
 
 # ── Clean helper ──────────────────────────────────────────────────────────────
@@ -162,53 +197,65 @@ def load_today_run() -> tuple[int, list[dict]] | None:
     Se esiste, restituisce (run_id, lista di dict con i risultati).
     Se non esiste, restituisce None.
     """
-    try:
-        ensure_db()
-        ensure_schema()
-        conn = _connect(POSTGRES_DB)
-    except Exception:
-        return None
-    try:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM screener_runs WHERE run_date = CURRENT_DATE ORDER BY id DESC LIMIT 1"
-            )
-            row = cur.fetchone()
-            if not row:
-                return None
-            run_id = row[0]
+    with _tracer.start_as_current_span("db.load_today_run") as span:
+        try:
+            ensure_db()
+            ensure_schema()
+            conn = _connect(POSTGRES_DB)
+        except Exception as exc:
+            _db_errors.add(1, {"db.operation": "load_today_run"})
+            span.record_exception(exc)
+            logger.error("load_today_run: errore connessione DB — %s", exc, exc_info=True)
+            return None
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT id FROM screener_runs WHERE run_date = CURRENT_DATE ORDER BY id DESC LIMIT 1"
+                )
+                row = cur.fetchone()
+                if not row:
+                    logger.debug("load_today_run: nessun run trovato per oggi")
+                    span.set_attribute("db.load_today_run.found", False)
+                    return None
+                run_id = row[0]
+                span.set_attribute("db.load_today_run.found", True)
+                span.set_attribute("db.load_today_run.run_id", run_id)
+                _load_today_run_hits.add(1)
 
-            cur.execute("""
-                SELECT
-                    ticker, nome, settore, industria, valuta, benchmark,
-                    prezzo, mktcap,
-                    ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
-                    roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
-                    mom_12m1m, eps_rev, upside_consensus, rel_strength, fcf_growth, score_momentum,
-                    score_finale, classificazione, rank,
-                    operating_margin, profit_margin, rev_growth, roa,
-                    current_ratio, dividend_yield, peg, week52_change, wacc,
-                    commento_ai
-                FROM screener_results
-                WHERE run_id = %s
-                ORDER BY rank ASC NULLS LAST
-            """, (run_id,))
-            cols = [d[0] for d in cur.description]
-            results = []
-            for r in cur.fetchall():
-                d = dict(zip(cols, r))
-                # converti Decimal → float
-                for k, v in d.items():
-                    if hasattr(v, 'is_finite'):   # Decimal
-                        import math as _math
-                        d[k] = float(v) if not (_math.isnan(float(v)) or _math.isinf(float(v))) else None
-                results.append(d)
-            return run_id, results
-    finally:
-        conn.close()
+                cur.execute("""
+                    SELECT
+                        ticker, nome, settore, industria, valuta, benchmark,
+                        prezzo, mktcap,
+                        ev_ebitda, p_fcf, pe, p_book, fcf_yield, score_value,
+                        roe, ebitda_margin, gross_margin, de_ratio, eps_cagr_5y, eps_cagr_4y, roic, score_quality,
+                        mom_12m1m, eps_rev, upside_consensus, rel_strength, fcf_growth, score_momentum,
+                        score_finale, classificazione, rank,
+                        operating_margin, profit_margin, rev_growth, roa,
+                        current_ratio, dividend_yield, peg, week52_change, wacc,
+                        commento_ai
+                    FROM screener_results
+                    WHERE run_id = %s
+                    ORDER BY rank ASC NULLS LAST
+                """, (run_id,))
+                cols = [d[0] for d in cur.description]
+                results = []
+                for r in cur.fetchall():
+                    d = dict(zip(cols, r))
+                    # converti Decimal → float
+                    for k, v in d.items():
+                        if hasattr(v, 'is_finite'):   # Decimal
+                            import math as _math
+                            d[k] = float(v) if not (_math.isnan(float(v)) or _math.isinf(float(v))) else None
+                    results.append(d)
+                span.set_attribute("db.load_today_run.result_count", len(results))
+                logger.debug("load_today_run: run_id=%d, %d risultati caricati", run_id, len(results))
+                return run_id, results
+        finally:
+            conn.close()
 
 
-def save_run(    results: list[dict],
+def save_run(
+    results: list[dict],
     benchmark: str,
     ai_enabled: bool = False,
 ) -> int:
@@ -216,6 +263,26 @@ def save_run(    results: list[dict],
     Salva un'esecuzione dello screener nel database.
     Restituisce l'id del run inserito.
     """
+    import time as _time
+    _t0 = _time.monotonic()
+    with _tracer.start_as_current_span(
+        "db.save_run",
+        attributes={
+            "db.save_run.n_results": len(results),
+            "db.save_run.ai_enabled": ai_enabled,
+        },
+    ) as span:
+        return _save_run_inner(results, benchmark, ai_enabled, span, _t0)
+
+def _save_run_inner(
+    results: list[dict],
+    benchmark: str,
+    ai_enabled: bool,
+    span,
+    _t0: float,
+) -> int:
+    """Logica interna di save_run (eseguita dentro lo span)."""
+    import time as _time
     ensure_db()
     ensure_schema()
 
@@ -309,6 +376,12 @@ def save_run(    results: list[dict],
             )
 
         conn.commit()
+        elapsed = _time.monotonic() - _t0
+        _save_run_duration.record(elapsed, {"db.operation": "save_run"})
+        _save_run_rows.record(len(rows), {"db.operation": "save_run"})
+        span.set_attribute("db.save_run.run_id", run_id)
+        span.set_attribute("db.save_run.duration_s", round(elapsed, 2))
+        logger.info("save_run: run_id=%d, %d risultati salvati in %.2fs", run_id, len(rows), elapsed)
     finally:
         conn.close()
 

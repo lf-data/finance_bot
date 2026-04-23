@@ -27,12 +27,66 @@ import yfinance as yf
 import colorama
 from colorama import Fore, Style
 
-import db as db_module
 from config import (
     ANALYSIS_LANGUAGE,
     LLM_API_KEY,
     LLM_MODEL,
     TAVILY_API_KEY,
+)
+from telemetry import get_tracer, get_meter, setup_telemetry, shutdown_telemetry
+
+setup_telemetry()
+
+import db as db_module
+
+_tracer = get_tracer(__name__)
+_meter  = get_meter(__name__)
+
+# ── Custom metrics instruments ───────────────────────────────────────────────
+_fetch_duration = _meter.create_histogram(
+    name="screener.fetch.duration",
+    description="Durata fetch metriche per singolo ticker (s)",
+    unit="s",
+)
+_fetch_errors = _meter.create_counter(
+    name="screener.fetch.errors",
+    description="Numero di fetch falliti per ticker",
+    unit="{errors}",
+)
+_score_distribution = _meter.create_histogram(
+    name="screener.score.finale",
+    description="Distribuzione score_finale VQM per ticker",
+    unit="{score}",
+)
+_ai_comment_duration = _meter.create_histogram(
+    name="screener.ai_comment.duration",
+    description="Durata generazione commento AI per ticker (s)",
+    unit="s",
+)
+_run_tickers_ok = _meter.create_counter(
+    name="screener.tickers.ok",
+    description="Ticker analizzati con successo in un run",
+    unit="{tickers}",
+)
+_run_tickers_error = _meter.create_counter(
+    name="screener.tickers.error",
+    description="Ticker falliti in un run",
+    unit="{tickers}",
+)
+_run_count = _meter.create_counter(
+    name="screener.run.count",
+    description="Esecuzioni screener completate (CLI + web)",
+    unit="{runs}",
+)
+_session_resets = _meter.create_counter(
+    name="screener.session.resets",
+    description="Reset sessione curl_cffi per gestire connessioni stale (VPN/riavvio)",
+    unit="{resets}",
+)
+_rf_rate_gauge = _meter.create_gauge(
+    name="screener.rf_rate",
+    description="Tasso risk-free corrente da BCE AAA 8Y (%)",
+    unit="%",
 )
 
 # Logger senza handler propri: i log vengono raccolti esclusivamente da
@@ -54,6 +108,23 @@ def _get_yf_session() -> curl_requests.Session:
     return _local.session
 
 
+def _reset_yf_session() -> None:
+    """Invalida la sessione curl_cffi del thread corrente.
+
+    Chiamato all'inizio di ogni run per gestire sessioni stale dopo riavvio
+    del server, reconnect VPN o cambio di interfaccia di rete. La sessione
+    verrà ricreata automaticamente al primo uso successivo di _get_yf_session().
+    """
+    if hasattr(_local, "session"):
+        try:
+            _local.session.close()
+        except Exception:
+            pass
+        del _local.session
+    _session_resets.add(1)
+    logger.debug("curl_cffi session invalidata — verrà ricreata al prossimo fetch")
+
+
 # ── Risk-free rate: ECB AAA sovereign curve 8Y (EUR) ─────────────────────────
 # Fonte: ECB Statistical Data Warehouse — yield curve AAA euro area, 8 anni.
 # Cachato 24h: non serve un aggiornamento più frequente per il WACC.
@@ -69,27 +140,29 @@ def _fetch_rf_rate() -> float:
         logger.debug("RF rate da cache — %.4f%%", _rf_cache["rate"] * 100)
         return _rf_cache["rate"]
     logger.info("Aggiornamento RF rate da BCE AAA curve 8Y")
-    try:
-        url = (
-            "https://data-api.ecb.europa.eu/service/data/"
-            "YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_8Y"
-            "?lastNObservations=1&format=jsondata"
-        )
-        # Usa curl_cffi per restare coerenti con il resto del codice (no dipendenze extra)
-        sess = curl_requests.Session(impersonate="chrome")
-        resp = sess.get(url, timeout=8)
-        resp.raise_for_status()
-        data  = resp.json()
-        value = data["dataSets"][0]["series"]["0:0:0:0:0:0:0"]["observations"]["0"][0]
-        rate  = float(value) / 100.0          # BCE restituisce in % (es. 2.85)
-        rate  = max(0.005, min(0.12, rate))   # sanity clamp 0.5%–12%
-        _rf_cache["rate"] = rate
-        _rf_cache["ts"]   = time.time()
-        logger.info("RF rate aggiornato — %.4f%%", rate * 100)
-        return rate
-    except Exception as exc:
-        logger.warning("Impossibile aggiornare RF rate — %s — uso fallback %.4f%%", exc, _rf_cache["rate"] * 100)
-        return _rf_cache["rate"]             # last known good o fallback 4%
+    with _tracer.start_as_current_span("screener.fetch_rf_rate"):
+        try:
+            url = (
+                "https://data-api.ecb.europa.eu/service/data/"
+                "YC/B.U2.EUR.4F.G_N_A.SV_C_YM.SR_8Y"
+                "?lastNObservations=1&format=jsondata"
+            )
+            # Usa curl_cffi per restare coerenti con il resto del codice (no dipendenze extra)
+            sess = curl_requests.Session(impersonate="chrome")
+            resp = sess.get(url, timeout=8)
+            resp.raise_for_status()
+            data  = resp.json()
+            value = data["dataSets"][0]["series"]["0:0:0:0:0:0:0"]["observations"]["0"][0]
+            rate  = float(value) / 100.0          # BCE restituisce in % (es. 2.85)
+            rate  = max(0.005, min(0.12, rate))   # sanity clamp 0.5%–12%
+            _rf_cache["rate"] = rate
+            _rf_cache["ts"]   = time.time()
+            _rf_rate_gauge.set(round(rate * 100, 4))
+            logger.info("RF rate aggiornato — %.4f%%", rate * 100)
+            return rate
+        except Exception as exc:
+            logger.warning("Impossibile aggiornare RF rate — %s — uso fallback %.4f%%", exc, _rf_cache["rate"] * 100)
+            return _rf_cache["rate"]             # last known good o fallback 4%
 
 
 # ── CLI HELPERS ───────────────────────────────────────────────────────────────
@@ -310,6 +383,10 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
     logger.debug("fetch_metrics START — ticker=%s benchmark=%s", ticker, benchmark)
     _t0_fm = time.perf_counter()
     result: dict = {"ticker": ticker}
+    _span = _tracer.start_span(
+        "screener.fetch_metrics",
+        attributes={"screener.ticker": ticker, "screener.benchmark": benchmark},
+    )
     try:
         t = yf.Ticker(ticker, session=_get_yf_session())
 
@@ -683,17 +760,25 @@ def fetch_metrics(ticker: str, benchmark: str = "FTSEMIB.MI") -> dict:
     except Exception as exc:
         logger.error("fetch_metrics ERRORE — ticker=%s — %s", ticker, exc, exc_info=True)
         result["_errore"] = str(exc)
+        _span.record_exception(exc)
+        _span.set_attribute("screener.fetch.status", "error")
 
     # Rimuovi None per pulizia
     clean = {k: v for k, v in result.items() if v is not None}
     _elapsed_fm = time.perf_counter() - _t0_fm
+    _fetch_duration.record(_elapsed_fm, {"screener.ticker": ticker})
     if result.get("_errore"):
+        _fetch_errors.add(1, {"screener.ticker": ticker})
+        _span.set_attribute("screener.fetch.status", "error")
         logger.warning("fetch_metrics FALLITO — ticker=%s elapsed=%.2fs", ticker, _elapsed_fm)
     else:
+        _span.set_attribute("screener.fetch.status", "ok")
+        _span.set_attribute("screener.fetch.metrics_count", len(clean))
         logger.debug(
             "fetch_metrics OK — ticker=%s score_finale=%s cls=%s elapsed=%.2fs metriche=%d",
             ticker, result.get("score_finale"), result.get("classificazione"), _elapsed_fm, len(clean),
         )
+    _span.end()
     return clean
 
 
@@ -732,6 +817,17 @@ def calc_vqm_score(metrics: dict) -> dict:
     Calcola score VALUE (0-10), QUALITY (0-10), MOMENTUM (0-10) e SCORE FINALE.
     Restituisce un dict con i punteggi e i singoli score di metrica.
     """
+    ticker = metrics.get("ticker", "unknown")
+    with _tracer.start_as_current_span(
+        "screener.calc_vqm_score",
+        attributes={"screener.ticker": ticker},
+    ):
+        return _calc_vqm_score_inner(metrics)
+
+
+def _calc_vqm_score_inner(metrics: dict) -> dict:
+    """Logica interna dello scoring VQM (chiamata dentro lo span)."""
+    ticker     = metrics.get("ticker", "unknown")
     w_value    = _VQM_WEIGHTS["value"]
     w_quality  = _VQM_WEIGHTS["quality"]
     w_momentum = _VQM_WEIGHTS["momentum"]
@@ -772,13 +868,19 @@ def calc_vqm_score(metrics: dict) -> dict:
 
     score_finale = round(sum(parts) / sum(weights), 2) if weights else None
 
-    return {
+    result = {
         "score_value":    score_v,
         "score_quality":  score_q,
         "score_momentum": score_m,
         "score_finale":   score_finale,
         **scores,
     }
+    if score_finale is not None:
+        _score_distribution.record(
+            score_finale,
+            {"screener.ticker": ticker, "screener.sector": metrics.get("settore", "_default")},
+        )
+    return result
 
 
 def _classify(score: float | None) -> str:
@@ -844,6 +946,16 @@ def _ai_comment(row: dict) -> str:
     ticker = row.get("ticker", "?")
     nome   = row.get("nome", ticker)
     logger.debug("_ai_comment START — ticker=%s", ticker)
+    _t0_ai = time.perf_counter()
+    with _tracer.start_as_current_span(
+        "screener.ai_comment",
+        attributes={"screener.ticker": ticker},
+    ) as span:
+        return _ai_comment_inner(row, ticker, nome, span, _t0_ai)
+
+
+def _ai_comment_inner(row: dict, ticker: str, nome: str, span, _t0_ai: float) -> str:
+    """Logica interna generazione commento AI (eseguita dentro lo span)."""
     news   = _search_ticker_news(ticker, nome)
     logger.debug("_ai_comment news — ticker=%s chars=%d", ticker, len(news))
 
@@ -890,9 +1002,17 @@ def _ai_comment(row: dict) -> str:
             HumanMessage(content=user_msg),
         ])
         comment = getattr(response, "content", "").strip()
-        logger.debug("_ai_comment OK — ticker=%s chars=%d", ticker, len(comment))
+        _elapsed_ai = time.perf_counter() - _t0_ai
+        _ai_comment_duration.record(_elapsed_ai, {"screener.ticker": ticker})
+        span.set_attribute("screener.ai_comment.chars", len(comment))
+        span.set_attribute("screener.ai_comment.status", "ok")
+        logger.debug("_ai_comment OK — ticker=%s chars=%d elapsed=%.2fs", ticker, len(comment), _elapsed_ai)
         return comment
     except Exception as exc:
+        _elapsed_ai = time.perf_counter() - _t0_ai
+        _ai_comment_duration.record(_elapsed_ai, {"screener.ticker": ticker})
+        span.record_exception(exc)
+        span.set_attribute("screener.ai_comment.status", "error")
         logger.warning("_ai_comment ERRORE — ticker=%s — %s", ticker, exc)
         return ""
 
@@ -963,7 +1083,16 @@ def _fetch_and_score(ticker: str, benchmark_override: str | None) -> tuple[str, 
     t0        = time.perf_counter()
     benchmark = _benchmark_for_ticker(ticker, benchmark_override)
     logger.debug("_fetch_and_score — ticker=%s benchmark=%s", ticker, benchmark)
-    m   = fetch_metrics(ticker, benchmark)
+    m = fetch_metrics(ticker, benchmark)
+    # Retry automatico con sessione fresca in caso di errore di connessione/rete.
+    # Evita falsi negativi dopo VPN reconnect o cambio IP mid-run.
+    if m.get("_errore"):
+        logger.info(
+            "_fetch_and_score retry sessione fresca — ticker=%s errore=%s",
+            ticker, m["_errore"],
+        )
+        _reset_yf_session()
+        m = fetch_metrics(ticker, benchmark)
     s   = calc_vqm_score(m)
     row = {**m, **s}
     row["classificazione"] = _classify(s.get("score_finale"))
@@ -998,6 +1127,34 @@ def run_screener(
     """
     if not tickers:
         return [], None
+
+    with _tracer.start_as_current_span(
+        "screener.run_screener",
+        attributes={
+            "screener.tickers.count": len(tickers),
+            "screener.benchmark_override": benchmark_override or "auto",
+            "screener.ai_enabled": ai,
+        },
+    ) as run_span:
+        return _run_screener_inner(
+            tickers, benchmark_override, ai, progress_callback, run_span
+        )
+
+
+def _run_screener_inner(
+    tickers: list[str],
+    benchmark_override: str | None,
+    ai: bool,
+    progress_callback,
+    run_span,
+) -> tuple[list[dict], int | None]:
+    """Logica interna del pipeline screener (chiamata dentro lo span run_screener)."""
+    # Sessione fresca ad ogni run: gestisce sessioni stale dopo riavvio server,
+    # reconnect VPN o cambio IP (causa principale di yfinance non funzionante
+    # dopo riavvio senza ricreare il container).
+    _reset_yf_session()
+    _bm_history_cache.clear()
+    _run_count.add(1, {"screener.benchmark": benchmark_override or "auto", "screener.ai": str(ai).lower()})
 
     logger.info(
         "run_screener START — %d ticker, benchmark=%s, ai=%s",
@@ -1110,9 +1267,16 @@ def run_screener(
 
     _n_ok  = sum(1 for r in ordered if not r.get("_errore"))
     _n_err = sum(1 for r in ordered if r.get("_errore"))
+    _elapsed_rs = time.monotonic() - _t0_rs
+    _run_tickers_ok.add(_n_ok)
+    _run_tickers_error.add(_n_err)
+    run_span.set_attribute("screener.run.tickers_ok", _n_ok)
+    run_span.set_attribute("screener.run.tickers_error", _n_err)
+    run_span.set_attribute("screener.run.duration_s", round(_elapsed_rs, 2))
+    run_span.set_attribute("screener.run.run_id", str(run_id))
     logger.info(
         "run_screener COMPLETATO — ok=%d errori=%d run_id=%s elapsed=%.1fs",
-        _n_ok, _n_err, run_id, time.monotonic() - _t0_rs,
+        _n_ok, _n_err, run_id, _elapsed_rs,
     )
     return ordered, run_id
 
@@ -1276,4 +1440,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    finally:
+        shutdown_telemetry()

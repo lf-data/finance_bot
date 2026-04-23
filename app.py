@@ -20,6 +20,14 @@ from config import (
     POSTGRES_USER,
 )
 
+# ── OpenTelemetry bootstrap ─────────────────────────────────────────────────
+# telemetry.setup_telemetry() deve essere chiamato PRIMA degli instrumentor
+# auto-instrument, così TracerProvider / MeterProvider / LoggerProvider sono
+# già registrati globalmente quando i vari Instrumentor li cercano.
+from telemetry import setup_telemetry, get_tracer, get_meter
+
+setup_telemetry()
+
 from opentelemetry.instrumentation.psycopg2 import Psycopg2Instrumentor
 from opentelemetry.instrumentation.requests import RequestsInstrumentor
 from opentelemetry.instrumentation.urllib3 import URLLib3Instrumentor
@@ -27,14 +35,6 @@ from opentelemetry.instrumentation.logging import LoggingInstrumentor
 from opentelemetry.instrumentation.threading import ThreadingInstrumentor
 from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 from opentelemetry.instrumentation.flask import FlaskInstrumentor
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-
-trace.set_tracer_provider(TracerProvider())
-
-span_processor = BatchSpanProcessor(ConsoleSpanExporter())
-trace.get_tracer_provider().add_span_processor(span_processor)
 
 Psycopg2Instrumentor().instrument()
 RequestsInstrumentor().instrument()
@@ -55,16 +55,59 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-tracer = trace.get_tracer(__name__)
+tracer = get_tracer(__name__)
+meter  = get_meter(__name__)
+
+# ── Custom metrics instruments ───────────────────────────────────────────────
+_http_request_duration = meter.create_histogram(
+    name="http.server.request.duration",
+    description="Durata richieste HTTP Flask (ms)",
+    unit="ms",
+)
+_db_query_duration = meter.create_histogram(
+    name="db.query.duration",
+    description="Durata query DB (ms)",
+    unit="ms",
+)
+_db_query_rows = meter.create_histogram(
+    name="db.query.rows",
+    description="Righe restituite da query DB",
+    unit="{rows}",
+)
+_screener_run_counter = meter.create_counter(
+    name="screener.runs.total",
+    description="Numero totale di esecuzioni screener avviate dal web",
+    unit="{runs}",
+)
+_screener_run_duration = meter.create_histogram(
+    name="screener.run.duration",
+    description="Durata esecuzione screener (s)",
+    unit="s",
+)
+_screener_ticker_count = meter.create_histogram(
+    name="screener.tickers.count",
+    description="Numero di ticker per run screener",
+    unit="{tickers}",
+)
+_fx_cache_hits = meter.create_counter(
+    name="fx.cache.hits",
+    description="Numero di volte che i tassi FX sono stati serviti da cache",
+    unit="{hits}",
+)
+
 logger.info("Flask app inizializzata")
-
-
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
 
+
 def _get_conn():
-    logger.debug("Apertura connessione DB — host=%s port=%s db=%s", POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB)
+    logger.debug(
+        "Apertura connessione DB — host=%s port=%s db=%s",
+        POSTGRES_HOST,
+        POSTGRES_PORT,
+        POSTGRES_DB,
+    )
     return psycopg2.connect(
         host=POSTGRES_HOST,
         port=POSTGRES_PORT,
@@ -86,11 +129,17 @@ def _normalize(v):
 def _query(sql: str, params=None) -> list[dict]:
     logger.debug("Esecuzione query — params=%s sql_preview=%.120s", params, sql.strip())
     conn = _get_conn()
+    _t0 = _time.monotonic()
     try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
-            rows = [{k: _normalize(v) for k, v in row.items()} for row in cur.fetchall()]
-            logger.debug("Query completata — %d righe restituite", len(rows))
+            rows = [
+                {k: _normalize(v) for k, v in row.items()} for row in cur.fetchall()
+            ]
+            _elapsed_ms = (_time.monotonic() - _t0) * 1000
+            _db_query_duration.record(_elapsed_ms)
+            _db_query_rows.record(len(rows))
+            logger.debug("Query completata — %d righe restituite in %.1fms", len(rows), _elapsed_ms)
             return rows
     except Exception as exc:
         logger.error("Errore query DB — %s", exc, exc_info=True)
@@ -101,18 +150,21 @@ def _query(sql: str, params=None) -> list[dict]:
 
 # ── Routes ────────────────────────────────────────────────────────────────────
 
+
 @app.route("/")
 def index():
+    _t0 = _time.monotonic()
     logger.info("GET / — dashboard richiesta da %s", request.remote_addr)
-    return render_template("index.html")
+    resp = render_template("index.html")
+    _http_request_duration.record((_time.monotonic() - _t0) * 1000, {"http.route": "/", "http.method": "GET"})
+    return resp
 
 
 @app.route("/sw.js")
 def service_worker():
     """Serve il service worker dalla root per avere scope completo."""
     logger.debug("GET /sw.js — service worker servito a %s", request.remote_addr)
-    resp = send_from_directory("static", "sw.js",
-                               mimetype="application/javascript")
+    resp = send_from_directory("static", "sw.js", mimetype="application/javascript")
     resp.headers["Service-Worker-Allowed"] = "/"
     resp.headers["Cache-Control"] = "no-cache"
     return resp
@@ -121,8 +173,10 @@ def service_worker():
 @app.route("/api/tickers")
 def api_tickers():
     """Lista di tutti i ticker con l'ultimo score disponibile."""
+    _t0 = _time.monotonic()
     logger.info("GET /api/tickers — richiesto da %s", request.remote_addr)
-    rows = _query("""
+    rows = _query(
+        """
         SELECT DISTINCT ON (ticker)
             ticker, nome, settore, industria, valuta, benchmark,
             prezzo, mktcap,
@@ -131,16 +185,22 @@ def api_tickers():
         FROM screener_results
         WHERE errore IS NULL
         ORDER BY ticker, run_date DESC
-    """)
+    """
+    )
     logger.info("GET /api/tickers — %d ticker restituiti", len(rows))
+    _http_request_duration.record((_time.monotonic() - _t0) * 1000, {"http.route": "/api/tickers", "http.method": "GET"})
     return jsonify(rows)
 
 
 @app.route("/api/ticker/<ticker>")
 def api_ticker_detail(ticker: str):
     """Serie storica completa per un ticker."""
-    logger.info("GET /api/ticker/%s — richiesto da %s", ticker.upper(), request.remote_addr)
-    rows = _query("""
+    _t0 = _time.monotonic()
+    logger.info(
+        "GET /api/ticker/%s — richiesto da %s", ticker.upper(), request.remote_addr
+    )
+    rows = _query(
+        """
         SELECT
             sr.run_date,
             sr.ticker, sr.nome, sr.settore, sr.industria, sr.valuta, sr.benchmark,
@@ -163,8 +223,11 @@ def api_ticker_detail(ticker: str):
         JOIN screener_runs run ON sr.run_id = run.id
         WHERE sr.ticker = %s AND sr.errore IS NULL
         ORDER BY sr.run_date ASC
-    """, (ticker.upper(),))
+    """,
+        (ticker.upper(),),
+    )
     logger.info("GET /api/ticker/%s — %d run restituite", ticker.upper(), len(rows))
+    _http_request_duration.record((_time.monotonic() - _t0) * 1000, {"http.route": "/api/ticker/{ticker}", "http.method": "GET"})
     return jsonify(rows)
 
 
@@ -186,7 +249,7 @@ def api_thresholds():
             for e in entries:
                 out[sector][e["metrica"]] = {
                     "good": e["good"],
-                    "bad":  e["bad"],
+                    "bad": e["bad"],
                     "lower_is_better": e["lower_is_better"],
                 }
     logger.debug("GET /api/thresholds — %d settori restituiti", len(out))
@@ -196,14 +259,18 @@ def api_thresholds():
 @app.route("/api/runs")
 def api_runs():
     """Lista delle ultime 30 esecuzioni."""
+    _t0 = _time.monotonic()
     logger.info("GET /api/runs — richiesto da %s", request.remote_addr)
-    rows = _query("""
+    rows = _query(
+        """
         SELECT id, run_at, run_date, benchmark, ai_enabled, n_tickers
         FROM screener_runs
         ORDER BY run_at DESC
         LIMIT 30
-    """)
+    """
+    )
     logger.info("GET /api/runs — %d run restituite", len(rows))
+    _http_request_duration.record((_time.monotonic() - _t0) * 1000, {"http.route": "/api/runs", "http.method": "GET"})
     return jsonify(rows)
 
 
@@ -211,7 +278,8 @@ def api_runs():
 def api_latest():
     """Tutti i risultati dell'ultima esecuzione, ordinati per rank."""
     logger.info("GET /api/latest — richiesto da %s", request.remote_addr)
-    rows = _query("""
+    rows = _query(
+        """
         SELECT
             sr.ticker, sr.nome, sr.settore, sr.industria, sr.valuta, sr.benchmark,
             sr.prezzo, sr.mktcap,
@@ -228,38 +296,61 @@ def api_latest():
         WHERE run.id = (SELECT MAX(id) FROM screener_runs)
           AND sr.errore IS NULL
         ORDER BY sr.rank ASC
-    """)
+    """
+    )
     logger.info("GET /api/latest — %d titoli restituiti", len(rows))
     return jsonify(rows)
 
 
 # ── Manual screener run ──────────────────────────────────────────────────────
 
-_run_lock   = threading.Lock()
+_run_lock = threading.Lock()
 _run_status: dict = {"running": False, "error": None, "done": 0, "total": 0}
 
 
 def _do_run() -> None:
-    with tracer.start_as_current_span("screener-run"):
+    with tracer.start_as_current_span(
+        "screener-run",
+        attributes={"screener.trigger": "web"},
+    ) as span:
         from screener import run_screener, DEFAULT_TICKERS
 
         def _progress(done: int, total: int) -> None:
-            _run_status["done"]  = done
+            _run_status["done"] = done
             _run_status["total"] = total
             logger.debug("Screener avanzamento — %d/%d ticker completati", done, total)
 
-        logger.info("Screener avviato in background — %d ticker da analizzare", len(DEFAULT_TICKERS))
+        n_tickers = len(DEFAULT_TICKERS)
+        span.set_attribute("screener.tickers.count", n_tickers)
+        _screener_run_counter.add(1, {"screener.trigger": "web"})
+        logger.info(
+            "Screener avviato in background — %d ticker da analizzare",
+            n_tickers,
+        )
         t_start = _time.monotonic()
         try:
-            _run_status["done"]  = 0
-            _run_status["total"] = len(DEFAULT_TICKERS)
+            _run_status["done"] = 0
+            _run_status["total"] = n_tickers
             run_screener(DEFAULT_TICKERS, progress_callback=_progress)
             elapsed = _time.monotonic() - t_start
-            logger.info("Screener completato con successo — %.1fs per %d ticker", elapsed, len(DEFAULT_TICKERS))
+            span.set_attribute("screener.run.duration_s", round(elapsed, 2))
+            span.set_attribute("screener.run.status", "ok")
+            _screener_run_duration.record(elapsed, {"screener.status": "ok"})
+            _screener_ticker_count.record(n_tickers, {"screener.status": "ok"})
+            logger.info(
+                "Screener completato con successo — %.1fs per %d ticker",
+                elapsed,
+                n_tickers,
+            )
             _run_status["error"] = None
         except Exception as exc:  # noqa: BLE001
             elapsed = _time.monotonic() - t_start
-            logger.error("Screener run fallito dopo %.1fs — %s", elapsed, exc, exc_info=True)
+            span.record_exception(exc)
+            span.set_attribute("screener.run.status", "error")
+            _screener_run_duration.record(elapsed, {"screener.status": "error"})
+            logger.error(
+                "Screener run fallito dopo %.1fs — %s", elapsed, exc, exc_info=True
+            )
             _run_status["error"] = str(exc)
         finally:
             _run_status["running"] = False
@@ -270,13 +361,17 @@ def _do_run() -> None:
 def api_run_screener():
     """Avvia lo screener in background. Se già in esecuzione restituisce 409."""
     if not _run_lock.acquire(blocking=False):
-        logger.warning("POST /api/run-screener — screener già in esecuzione, richiesta rifiutata (409)")
+        logger.warning(
+            "POST /api/run-screener — screener già in esecuzione, richiesta rifiutata (409)"
+        )
         return jsonify({"running": True, "error": None}), 409
-    logger.info("POST /api/run-screener — avvio screener manuale da %s", request.remote_addr)
+    logger.info(
+        "POST /api/run-screener — avvio screener manuale da %s", request.remote_addr
+    )
     _run_status["running"] = True
-    _run_status["error"]   = None
-    _run_status["done"]    = 0
-    _run_status["total"]   = 0
+    _run_status["error"] = None
+    _run_status["done"] = 0
+    _run_status["total"] = 0
     threading.Thread(target=_do_run, daemon=True, name="screener-manual").start()
     return jsonify({"running": True, "error": None}), 202
 
@@ -284,8 +379,12 @@ def api_run_screener():
 @app.route("/api/run-screener/status")
 def api_run_screener_status():
     """Stato corrente dell'esecuzione: {running, error}."""
-    logger.debug("GET /api/run-screener/status — running=%s done=%d total=%d",
-                 _run_status["running"], _run_status["done"], _run_status["total"])
+    logger.debug(
+        "GET /api/run-screener/status — running=%s done=%d total=%d",
+        _run_status["running"],
+        _run_status["done"],
+        _run_status["total"],
+    )
     return jsonify(_run_status)
 
 
@@ -301,11 +400,13 @@ def api_fx_rates():
     logger.info("GET /api/fx-rates — richiesto da %s", request.remote_addr)
     if _time.time() - _fx_cache["ts"] < _FX_TTL:
         age = int(_time.time() - _fx_cache["ts"])
+        _fx_cache_hits.add(1)
         logger.debug("FX rates serviti da cache (età %ds, TTL %ds)", age, _FX_TTL)
         return jsonify(_fx_cache["rates"])
     logger.info("FX rates cache scaduta — recupero tassi aggiornati da yfinance")
     try:
         import yfinance as yf
+
         pairs = {
             "USD": "USDEUR=X",
             "CHF": "CHFEUR=X",
@@ -319,15 +420,27 @@ def api_fx_rates():
         for currency, symbol in pairs.items():
             try:
                 info = yf.Ticker(symbol).fast_info
-                price = getattr(info, "last_price", None) or getattr(info, "regular_market_previous_close", None)
+                price = getattr(info, "last_price", None) or getattr(
+                    info, "regular_market_previous_close", None
+                )
                 if price and price > 0:
                     rates[currency] = round(float(price), 6)
-                    logger.debug("Tasso FX aggiornato — %s/%s = %.6f", currency, "EUR", rates[currency])
+                    logger.debug(
+                        "Tasso FX aggiornato — %s/%s = %.6f",
+                        currency,
+                        "EUR",
+                        rates[currency],
+                    )
             except Exception as fx_exc:
-                logger.warning("Impossibile ottenere tasso FX per %s (%s) — %s", currency, symbol, fx_exc)
+                logger.warning(
+                    "Impossibile ottenere tasso FX per %s (%s) — %s",
+                    currency,
+                    symbol,
+                    fx_exc,
+                )
         if len(rates) > 1:  # almeno un tasso ottenuto
             _fx_cache["rates"] = rates
-            _fx_cache["ts"]    = _time.time()
+            _fx_cache["ts"] = _time.time()
             logger.info("FX rates aggiornati — %d valute in cache", len(rates))
         else:
             logger.warning("Nessun tasso FX ottenuto — restituzione cache precedente")
