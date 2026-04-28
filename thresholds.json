@@ -52,7 +52,7 @@
     "ERIC-B.ST", "VOLV-B.ST", "HEXA-B.ST", "ATCO-B.ST", "SWED-A.ST",
     "SAND.ST", "EQNR.OL", "TEL.OL", "DNB.OL", "NOKIA.HE", "KNEBV.HE",
     "NESTE.HE",
-    "ABI.BR", "KBC.BR", "UCB.BR", "SOLB.BR", "EDP.LS", "EDPR.LS",
+    "ABI.BR", "KBC.BR", "UCB.BR", "SOLB.BR", "EDP.LS", "EDPR.LS"
 ],
   "Financial Services": {
     "value": [
