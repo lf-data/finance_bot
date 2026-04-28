@@ -5,86 +5,53 @@
     "momentum": 0.25
   },
   "tickers": [
-   # --- FTSE MIB & Piazza Affari ---
-    "A2A.MI", "AMP.MI", "AVIO.MI", "AZM.MI", "BMED.MI", "BC.MI", "BZU.MI",
+  "A2A.MI", "AMP.MI", "AVIO.MI", "AZM.MI", "BMED.MI", "BC.MI", "BZU.MI",
     "CPR.MI", "DIA.MI", "ENEL.MI", "ENI.MI", "RACE.MI", "FCT.MI", "G.MI",
     "HER.MI", "ISP.MI", "INW.MI", "IG.MI", "LDO.MI", "MONC.MI", "NEXI.MI",
     "PST.MI", "PRY.MI", "REC.MI", "SPM.MI", "SRG.MI", "STLAM.MI", "STM.MI",
     "TIT.MI", "TEN.MI", "TRN.MI", "UCG.MI", "UNI.MI", "MB.MI", "BAMI.MI",
     "BPER.MI", "ERG.MI", "FNM.MI", "CNHI.MI", "IVCG.MI",
-
-    # --- USA Large Cap Tech ---
     "AAPL", "MSFT", "GOOG", "AMZN", "META", "TSLA", "NVDA", "NFLX", "ORCL",
     "INTC", "AMD", "CRM", "ADBE", "CSCO", "QCOM", "AVGO", "PYPL", "SNOW",
     "PLTR", "UBER", "ABNB", "SPOT", "SHOP", "ZM", "NET", "DDOG", "NOW",
     "WDAY", "INTU", "PANW", "CRWD", "FTNT", "ANET", "ZS", "OKTA",
-
-    # --- USA Semiconduttori ---
     "AMAT", "LRCX", "KLAC", "MU", "NXPI", "TXN", "ADI", "MRVL", "ON",
-
-    # --- USA Consumer & Retail ---
     "DIS", "NKE", "KO", "PEP", "MCD", "WMT", "COST", "HD", "LOW", "TGT",
     "TJX", "ROST", "SBUX", "MO", "PM", "MDLZ", "GIS", "PG", "CL", "KMB",
     "EL",
-
-    # --- USA Pharma & Healthcare ---
     "LLY", "JNJ", "PFE", "ABBV", "MRK", "AMGN", "GILD", "REGN", "VRTX",
     "BMY", "TMO", "ABT", "MDT", "ISRG", "EW", "UNH", "CVS", "CI", "HUM",
-
-    # --- USA Finance ---
     "V", "MA", "JPM", "BAC", "GS", "MS", "WFC", "C", "BLK", "SCHW", "AXP",
     "SPGI", "MCO", "ICE", "CME", "BRK-B", "ADP", "FIS", "FISV", "GPN",
     "VRSK", "MSCI", "IT",
-
-    # --- USA Difesa & Industriali ---
     "LMT", "RTX", "NOC", "GD", "BA", "HON", "CAT", "DE", "ETN", "EMR",
     "MMM", "GE", "UPS", "FDX", "ACN",
-
-    # --- USA Energia & Utility ---
     "XOM", "CVX", "COP", "EOG", "SLB", "HAL", "MPC", "VLO", "NEE", "SO",
     "DUK", "D", "TMUS", "VZ", "T", "CMCSA", "CHTR",
-
-    # --- USA Real Estate & Altro ---
     "AMT", "PLD", "EQIX", "PSA", "CBRE", "CSGP", "WM", "RSG", "CDNS",
     "ANSS", "CRH",
-
-    # --- Germania .DE ---
     "SAP.DE", "SIE.DE", "BAS.DE", "BAYN.DE", "BMW.DE", "DTE.DE", "VOW3.DE",
     "IFX.DE", "ALV.DE", "DBK.DE", "MUV2.DE", "RWE.DE", "EOAN.DE", "RHM.DE",
     "ADS.DE", "MBG.DE", "HNR1.DE", "LIN.DE", "HEI.DE", "SHL.DE", "FRE.DE",
     "AIR.DE", "MAN.DE", "BOSS.DE", "DHER.DE", "ZAL.DE", "AIXA.DE", "MTX.DE",
     "ENR.DE", "TKA.DE", "VNA.DE",
-
-    # --- Francia .PA ---
     "MC.PA", "OR.PA", "SAN.PA", "SU.PA", "AIR.PA", "ENGI.PA", "TTE.PA",
     "BNP.PA", "ACA.PA", "GLE.PA", "CS.PA", "RI.PA", "ML.PA", "ORA.PA",
     "RNO.PA", "VIV.PA", "SAF.PA", "HO.PA", "LR.PA", "BN.PA", "STLA.PA",
     "KER.PA",
-
-    # --- Paesi Bassi .AS ---
     "ASML", "INGA.AS", "PHIA.AS", "HEIA.AS", "NN.AS", "RAND.AS",
-
-    # --- Spagna .MC ---
     "SAN", "BBVA", "ITX.MC", "IBE.MC", "REP.MC", "TEF.MC", "ACS.MC",
     "ANA.MC",
-
-    # --- Svizzera .SW ---
     "NESN.SW", "ROG.SW", "NOVN.SW", "UBSG.SW", "CFR.SW", "SREN.SW",
     "ABBN.SW", "ZURN.SW", "LONN.SW", "SIKA.SW", "ADEN.SW", "GIVN.SW",
     "GEBN.SW",
-
-    # --- Regno Unito .L ---
     "AZN.L", "SHEL.L", "HSBA.L", "BP.L", "GSK.L", "RIO.L", "DGE.L",
     "BA.L", "RR.L", "ULVR.L", "BT-A.L", "LLOY.L", "BATS.L", "LGEN.L",
     "PRU.L", "NG.L", "NXT.L", "WPP.L", "CPG.L", "LSEG.L", "EXPN.L",
     "KYGA.L", "CRDA.L", "MNG.L",
-
-    # --- Nordici ---
     "ERIC-B.ST", "VOLV-B.ST", "HEXA-B.ST", "ATCO-B.ST", "SWED-A.ST",
     "SAND.ST", "EQNR.OL", "TEL.OL", "DNB.OL", "NOKIA.HE", "KNEBV.HE",
     "NESTE.HE",
-
-    # --- Belgio & Portogallo ---
     "ABI.BR", "KBC.BR", "UCB.BR", "SOLB.BR", "EDP.LS", "EDPR.LS",
 ],
   "Financial Services": {
