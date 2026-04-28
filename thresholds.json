@@ -1,8 +1,8 @@
 {
   "pesi": {
-    "value": 0.25,
+    "value": 0.3,
     "quality": 0.5,
-    "momentum": 0.25
+    "momentum": 0.2
   },
   "tickers": [
   "A2A.MI", "AMP.MI", "AVIO.MI", "AZM.MI", "BMED.MI", "BC.MI", "BZU.MI",
